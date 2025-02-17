@@ -55,7 +55,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
-          POSTGRES_DB: ${{ matrix.dbname }}
+          POSTGRES_DB: eccube_db
         ports:
           - 5432:5432
         # needed because the postgres container does not provide a healthcheck
@@ -114,8 +114,8 @@ jobs:
       - name: Setup PostgreSQL User
         if: matrix.db == 'pgsql'
         run: |
-          docker exec $(docker ps -qf "name=postgres") psql -U postgres -c "CREATE USER myuser WITH PASSWORD 'mypassword';"
-          docker exec $(docker ps -qf "name=postgres") psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${{ matrix.dbname }} TO myuser;"
+          docker exec postgres psql -U postgres -c "CREATE USER myuser WITH PASSWORD 'mypassword';"
+          docker exec postgres psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE eccube_db TO myuser;"
 
       - name: Setup EC-CUBE
         env:
