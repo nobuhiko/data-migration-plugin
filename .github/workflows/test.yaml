@@ -124,7 +124,7 @@ jobs:
         env:
           APP_ENV: "test"
           APP_DEBUG: 0
-          DATABASE_URL: ${{ matrix.database_url }}
+          DATABASE_URL: ${{ matrix.database_url_2 }}
           DATABASE_SERVER_VERSION: ${{ matrix.database_server_version }}
           DATABASE_CHARSET: ${{ matrix.database_charset }}
         working-directory: "ec-cube"
@@ -136,7 +136,7 @@ jobs:
         env:
           APP_ENV: "test"
           APP_DEBUG: 0
-          DATABASE_URL: ${{ matrix.database_url }}
+          DATABASE_URL: ${{ matrix.database_url_2 }}
           DATABASE_SERVER_VERSION: ${{ matrix.database_server_version }}
           DATABASE_CHARSET: ${{ matrix.database_charset }}
           PLUGIN_CODE: ${{ matrix.plugin_code }}
@@ -152,7 +152,7 @@ jobs:
         env:
           APP_ENV: "test"
           APP_DEBUG: 0
-          DATABASE_URL: ${{ matrix.database_url }}
+          DATABASE_URL: ${{ matrix.database_url_2 }}
           DATABASE_SERVER_VERSION: ${{ matrix.database_server_version }}
           DATABASE_CHARSET: ${{ matrix.database_charset }}
           PLUGIN_CODE: ${{ matrix.plugin_code }}

@@ -191,6 +191,12 @@ class ConfigController extends AbstractController
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } else {
+            $this->disableTrigger($em, 'dtb_customer');
+            $this->disableTrigger($em, 'dtb_customer_address');
+            $this->disableTrigger($em, 'dtb_order');
+            $this->disableTrigger($em, 'dtb_order_item');
+            $this->disableTrigger($em, 'dtb_shipping');
+            $this->disableTrigger($em, 'dtb_mail_history');
         }
 
         // 会員
@@ -259,6 +265,9 @@ class ConfigController extends AbstractController
                     $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
                     $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
                 } else {
+                    $this->disableTrigger($em, 'dtb_member');
+                    $this->disableTrigger($em, 'dtb_customer');
+                    $this->disableTrigger($em, 'dtb_customer_address');
                 }
 
                 $this->saveToC($em, $csvDir, 'mtb_job', null, true);
@@ -474,6 +483,16 @@ class ConfigController extends AbstractController
                     $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
                     $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
                 } else {
+                    $this->disableTrigger($em, 'dtb_product');
+                    $this->disableTrigger($em, 'dtb_product_class');
+                    $this->disableTrigger($em, 'dtb_class_category');
+                    $this->disableTrigger($em, 'dtb_class_name');
+                    $this->disableTrigger($em, 'dtb_category');
+                    $this->disableTrigger($em, 'dtb_product_stock');
+                    $this->disableTrigger($em, 'dtb_product_image');
+                    $this->disableTrigger($em, 'dtb_product_tag');
+                    $this->disableTrigger($em, 'dtb_tag');
+                    $this->disableTrigger($em, 'dtb_customer_favorite_product');
                 }
 
                 // 2.11系の処理
@@ -1227,15 +1246,7 @@ class ConfigController extends AbstractController
         }
     }
 
-    private function setIdSeq($em, $tableName)
-    {
-        $max = $em->fetchOne('SELECT coalesce(max(id), 0) + 1  FROM ' . $tableName);
-        $seq = $tableName . '_id_seq';
-        $count = $em->fetchOne("select count(*) from pg_class where relname = '$seq';");
-        if ($count) {
-            $em->exec("SELECT setval('$seq', $max);");
-        }
-    }
+
 
     private function saveOrder($em, $csvDir)
     {
@@ -1250,8 +1261,15 @@ class ConfigController extends AbstractController
                     $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
                     $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
                 } else {
-                    //$em->exec('SET session_replication_role = replica;'); // need super user
-
+                    $this->disableTrigger($em, 'dtb_order');
+                    $this->disableTrigger($em, 'dtb_order_item');
+                    $this->disableTrigger($em, 'dtb_shipping');
+                    $this->disableTrigger($em, 'dtb_payment');
+                    $this->disableTrigger($em, 'dtb_delivery');
+                    $this->disableTrigger($em, 'dtb_delivery_fee');
+                    $this->disableTrigger($em, 'dtb_delivery_time');
+                    $this->disableTrigger($em, 'dtb_tax_rule');
+                    $this->disableTrigger($em, 'dtb_mail_history');
                 }
 
                 // 2.4には存在しないデータ
@@ -1882,21 +1900,24 @@ class ConfigController extends AbstractController
         if ($platform == 'mysql') {
             $em->exec('DELETE FROM ' . $tableName);
         } else {
-
-            // 外部キー制約を持つテーブルを先に削除する
-            $foreignKeys = $em->getSchemaManager()->listTableForeignKeys($tableName);
-            foreach ($foreignKeys as $foreignKey) {
-                $referencedTableName = $foreignKey->getForeignTableName();
-                $em->exec('ALTER TABLE ONLY ' . $referencedTableName . ' DISABLE TRIGGER ALL;');
-            }
-
-            $em->exec('TRUNCATE TABLE ' . $tableName);
-
-            foreach ($foreignKeys as $foreignKey) {
-                $referencedTableName = $foreignKey->getForeignTableName();
-                $em->exec('ALTER TABLE ONLY ' . $referencedTableName . ' ENABLE TRIGGER ALL;');
-            }
+            $em->exec('DELETE FROM ' . $tableName);
         }
+    }
+
+    private function disableTrigger($em, $tableName)
+    {
+        $em->exec('ALTER TABLE ONLY ' . $tableName . ' DISABLE TRIGGER ALL;');
+    }
+
+    private function setIdSeq($em, $tableName)
+    {
+        $max = $em->fetchOne('SELECT coalesce(max(id), 0) + 1  FROM ' . $tableName);
+        $seq = $tableName . '_id_seq';
+        $count = $em->fetchOne("select count(*) from pg_class where relname = '$seq';");
+        if ($count) {
+            $em->exec("SELECT setval('$seq', $max);");
+        }
+        $em->exec('ALTER TABLE ONLY ' . $tableName . ' ENABLE TRIGGER ALL;');
     }
 
 
