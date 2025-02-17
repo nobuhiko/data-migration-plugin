@@ -129,7 +129,7 @@ jobs:
           DATABASE_CHARSET: ${{ matrix.database_charset }}
         working-directory: 'ec-cube'
         run: |
-          bin/console doctrine:database:create
+          bin/console doctrine:database:create || true
           bin/console doctrine:schema:create
           bin/console eccube:fixtures:load
       - name: Setup Plugin
