@@ -1263,7 +1263,10 @@ class ConfigController extends AbstractController
                 $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
                 $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
             } else {
-                $em->exec('SET session_replication_role = replica;'); // need super user
+                //$em->exec('SET session_replication_role = replica;'); // need super user
+                $em->exec('ALTER TABLE ONLY dtb_order DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_shipping DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_payment DISABLE TRIGGER ALL;');
             }
 
             // 2.4には存在しないデータ
