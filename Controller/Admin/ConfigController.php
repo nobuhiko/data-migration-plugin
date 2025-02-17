@@ -1883,9 +1883,19 @@ class ConfigController extends AbstractController
             $em->exec('DELETE FROM ' . $tableName);
         } else {
 
-            $em->exec('ALTER TABLE ONLY ' . $tableName . ' DISABLE TRIGGER ALL;');
-            $em->exec('TRUNCATE FROM ' . $tableName);
-            $em->exec('ALTER TABLE ONLY ' . $tableName . ' ENABLE TRIGGER ALL;');
+            // 外部キー制約を持つテーブルを先に削除する
+            $foreignKeys = $em->getSchemaManager()->listTableForeignKeys($tableName);
+            foreach ($foreignKeys as $foreignKey) {
+                $referencedTableName = $foreignKey->getForeignTableName();
+                $em->exec('ALTER TABLE ONLY ' . $referencedTableName . ' DISABLE TRIGGER ALL;');
+            }
+
+            $em->exec('TRUNCATE TABLE ' . $tableName);
+
+            foreach ($foreignKeys as $foreignKey) {
+                $referencedTableName = $foreignKey->getForeignTableName();
+                $em->exec('ALTER TABLE ONLY ' . $referencedTableName . ' ENABLE TRIGGER ALL;');
+            }
         }
     }
 
