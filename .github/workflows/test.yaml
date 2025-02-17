@@ -21,7 +21,7 @@ jobs:
             database_server_version: 8
             database_charset: utf8mb4
           - db: pgsql
-            database_url: postgres://postgres:password@127.0.0.1:5432/eccube_db
+            database_url: postgres://myuser:mypassword@127.0.0.1:5432/eccube_db
             database_server_version: 14
             database_charset: utf8
         exclude:
@@ -110,6 +110,13 @@ jobs:
       - name: Install to composer
         working-directory: 'ec-cube'
         run: composer install --no-interaction -o --apcu-autoloader
+
+      - name: Setup PostgreSQL User
+        if: matrix.db == 'pgsql'
+        run: |
+          docker exec postgres psql -U postgres -c "CREATE USER myuser WITH PASSWORD 'mypassword';"
+          docker exec postgres psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${{ matrix.dbname }} TO myuser;"
+
 
       - name: Setup EC-CUBE
         env:
