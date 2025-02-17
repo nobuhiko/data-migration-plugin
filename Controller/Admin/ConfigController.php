@@ -165,8 +165,8 @@ class ConfigController extends AbstractController
             // 全データ移行
             } else {
                 $this->saveCustomer($em, $csvDir);
-                $this->saveProduct($em, $csvDir);
-                $this->saveOrder($em, $csvDir);
+                //$this->saveProduct($em, $csvDir);
+                //$this->saveOrder($em, $csvDir);
             }
 
             // 削除
@@ -257,47 +257,52 @@ class ConfigController extends AbstractController
         // 会員系
         if (file_exists($csvDir.'dtb_customer.csv') && filesize($csvDir.'dtb_customer.csv') > 0) {
             $em->beginTransaction();
+            try {
 
-            $platform = $em->getDatabasePlatform()->getName();
+                $platform = $em->getDatabasePlatform()->getName();
 
-            if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-                $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-            } else {
-                $em->exec('ALTER TABLE ONLY dtb_customer DISABLE TRIGGER ALL;');
-                $em->exec('ALTER TABLE ONLY dtb_customer_address DISABLE TRIGGER ALL;'); 
+                if ($platform == 'mysql') {
+                    $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
+                    $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
+                } else {
+                    $em->exec('ALTER TABLE ONLY dtb_customer DISABLE TRIGGER ALL;');
+                    $em->exec('ALTER TABLE ONLY dtb_customer_address DISABLE TRIGGER ALL;');
+                    $em->exec('ALTER TABLE ONLY dtb_member DISABLE TRIGGER ALL;');
+                }
+
+                $this->saveToC($em, $csvDir, 'mtb_job', null, true);
+                $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
+
+                if ($this->flag_4) {
+                    $this->saveToC($em, $csvDir, 'mtb_customer_order_status', null, true);
+                    $this->saveToC($em, $csvDir, 'mtb_customer_status', null, true);
+                }
+
+                $this->saveToC($em, $csvDir, 'dtb_customer');
+                if ($this->flag_4) {
+                    $this->saveToC($em, $csvDir, 'dtb_customer_address');
+                } else if ($this->flag_3) {
+                    // fixme 余計なデータが移行される
+                    $this->saveToC($em, $csvDir, 'dtb_customer_address');
+                } else {
+                    $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1);
+                }
+
+                $this->saveToC($em, $csvDir, 'mtb_authority', null, true);
+                $this->saveToC($em, $csvDir, 'dtb_member', null, true);
+
+                if ($platform == 'mysql') {
+                    $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+                } else {
+                    $this->setIdSeq($em, 'dtb_member');
+                    $this->setIdSeq($em, 'dtb_customer');
+                    $this->setIdSeq($em, 'dtb_customer_address');
+                }
+                $em->commit();
+            } catch (\Exception $e) {
+                $em->rollback();
+                throw $e;
             }
-
-            $this->saveToC($em, $csvDir, 'mtb_job', null, true);
-            $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
-
-            if ($this->flag_4) {
-                $this->saveToC($em, $csvDir, 'mtb_customer_order_status', null, true);
-                $this->saveToC($em, $csvDir, 'mtb_customer_status', null, true);
-            }
-
-            $this->saveToC($em, $csvDir, 'dtb_customer');
-            if ($this->flag_4) {
-                $this->saveToC($em, $csvDir, 'dtb_customer_address');
-            } else if ($this->flag_3) {
-                // fixme 余計なデータが移行される
-                $this->saveToC($em, $csvDir, 'dtb_customer_address');
-            } else {
-                $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1);
-            }
-
-            $this->saveToC($em, $csvDir, 'mtb_authority', null, true);
-            $this->saveToC($em, $csvDir, 'dtb_member', null, true);
-
-            if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
-            } else {
-                $this->setIdSeq($em, 'dtb_member');
-                $this->setIdSeq($em, 'dtb_customer');
-                $this->setIdSeq($em, 'dtb_customer_address');
-            }
-            $em->commit();
-
             $this->addSuccess('会員データ登録しました。', 'admin');
         } else {
             $this->addDanger('会員データが見つかりませんでした', 'admin');
