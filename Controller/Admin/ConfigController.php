@@ -1884,7 +1884,7 @@ class ConfigController extends AbstractController
         } else {
 
             $em->exec('ALTER TABLE ONLY ' . $tableName . ' DISABLE TRIGGER ALL;');
-            $em->exec('DELETE FROM ' . $tableName);
+            $em->exec('TRUNCATE FROM ' . $tableName);
             $em->exec('ALTER TABLE ONLY ' . $tableName . ' ENABLE TRIGGER ALL;');
         }
     }
