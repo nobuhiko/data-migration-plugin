@@ -119,6 +119,7 @@ jobs:
         run: |
           docker exec $(docker ps -qf "name=postgres") psql -U postgres -c "CREATE USER myuser WITH PASSWORD 'mypassword';"
           docker exec $(docker ps -qf "name=postgres") psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE eccube_db TO myuser;"
+          docker exec $(docker ps -qf "name=postgres") psql -U postgres -c "GRANT USAGE ON SCHEMA public TO myuser;"
           docker exec $(docker ps -qf "name=postgres") psql -U postgres -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO myuser;"
           docker exec $(docker ps -qf "name=postgres") psql -U postgres -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO myuser;"
 
