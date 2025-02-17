@@ -191,7 +191,12 @@ class ConfigController extends AbstractController
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } else {
-            $em->exec('SET session_replication_role = replica;'); // need super user
+            $em->exec('ALTER TABLE ONLY dtb_customer DISABLE TRIGGER ALL;');
+            $em->exec('ALTER TABLE ONLY dtb_customer_address DISABLE TRIGGER ALL;');
+            $em->exec('ALTER TABLE ONLY dtb_order DISABLE TRIGGER ALL;');
+            $em->exec('ALTER TABLE ONLY dtb_order_item DISABLE TRIGGER ALL;');
+            $em->exec('ALTER TABLE ONLY dtb_shipping DISABLE TRIGGER ALL;');
+            $em->exec('ALTER TABLE ONLY dtb_mail_history DISABLE TRIGGER ALL;');
         }
 
         // 会員
@@ -259,7 +264,8 @@ class ConfigController extends AbstractController
                 $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
                 $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
             } else {
-                $em->exec('SET session_replication_role = replica;'); // need super user
+                $em->exec('ALTER TABLE ONLY dtb_customer DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_customer_address DISABLE TRIGGER ALL;'); 
             }
 
             $this->saveToC($em, $csvDir, 'mtb_job', null, true);
@@ -471,7 +477,17 @@ class ConfigController extends AbstractController
                 $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
                 $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
             } else {
-                $em->exec('SET session_replication_role = replica;');
+                // トリガーを無効にする
+                $em->exec('ALTER TABLE ONLY dtb_product DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_product_class DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_class_category DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_class_name DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_product_category DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_product_stock DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_product_image DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_tag DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_product_tag DISABLE TRIGGER ALL;');
+                $em->exec('ALTER TABLE ONLY dtb_customer_favorite_product DISABLE TRIGGER ALL;');
             }
 
             // 2.11系の処理
