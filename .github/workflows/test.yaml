@@ -114,9 +114,8 @@ jobs:
       - name: Setup PostgreSQL User
         if: matrix.db == 'pgsql'
         run: |
-          docker exec postgres psql -U postgres -c "CREATE USER myuser WITH PASSWORD 'mypassword';"
-          docker exec postgres psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${{ matrix.dbname }} TO myuser;"
-
+          docker exec $(docker ps -qf "name=postgres") psql -U postgres -c "CREATE USER myuser WITH PASSWORD 'mypassword';"
+          docker exec $(docker ps -qf "name=postgres") psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ${{ matrix.dbname }} TO myuser;"
 
       - name: Setup EC-CUBE
         env:
