@@ -4,6 +4,7 @@ namespace Plugin\DataMigration42\Controller\Admin;
 
 //use Doctrine\DBAL\Driver\Connection;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Logging\Middleware;
 
 use Eccube\Controller\AbstractController;
 use Eccube\Service\PluginService;
@@ -87,7 +88,14 @@ class ConfigController extends AbstractController
 
         if ($form->isSubmitted() && $form->isValid()) {
             // logをオフにしてメモリを減らす
-            $em->getConfiguration()->setSQLLogger(null);
+            $configuration = $em->getConfiguration();
+            $middlewares = $configuration->getMiddlewares();
+            foreach ($middlewares as $key => $value) {
+                if ($value instanceof Middleware) {
+                    unset($middlewares[$key]);
+                }
+            }
+            $configuration->setMiddlewares($middlewares);
 
             $formFile = $form['import_file']->getData();
 
