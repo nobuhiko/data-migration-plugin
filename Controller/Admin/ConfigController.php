@@ -151,23 +151,23 @@ class ConfigController extends AbstractController
                 }
             }
 
-            $this->beginTransaction($em);
-
-            //try {
-            // 会員・受注のみ移行
-            if ($form['customer_order_only']->getData()) {
-                $this->saveCustomerAndOrder($em, $csvDir);
-                // 全データ移行
-            } else {
-                $this->saveCustomer($em, $csvDir);
-                $this->saveProduct($em, $csvDir);
-                $this->saveOrder($em, $csvDir);
+            try {
+                $this->beginTransaction($em);
+                // 会員・受注のみ移行
+                if ($form['customer_order_only']->getData()) {
+                    $this->saveCustomerAndOrder($em, $csvDir);
+                    // 全データ移行
+                } else {
+                    $this->saveCustomer($em, $csvDir);
+                    $this->saveProduct($em, $csvDir);
+                    $this->saveOrder($em, $csvDir);
+                }
+                $this->commitTransaction($em);
+            } catch (\Exception $e) {
+                $this->rollbackTransaction($em);
+                $this->addDanger('登録に失敗しました。' . $e->getMessage(), 'admin');
+                //throw $e;
             }
-            $this->commitTransaction($em);
-            //} catch (\Exception $e) {
-            //    $this->rollbackTransaction($em);
-            //    throw $e;
-            //}
 
             // 削除
             $fs = new Filesystem();
