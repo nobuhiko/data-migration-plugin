@@ -103,7 +103,7 @@ class ConfigController extends AbstractController
             $tmpDir = $this->pluginService->createTempDir();
             $formFile->move($tmpDir, $tmpFile);
 
-            $archive = UnifiedArchive::open($tmpDir.'/'.$tmpFile);
+            $archive = UnifiedArchive::open($tmpDir . '/' . $tmpFile);
             $fileNames = $archive->getFileNames();
             // 解凍
             $archive->extractFiles($tmpDir, $fileNames);
@@ -116,21 +116,21 @@ class ConfigController extends AbstractController
             $path = pathinfo($fileNames[0]);
 
             if ($path != '.') {
-                $csvDir = $tmpDir.'/'.$path['dirname'].'/';
+                $csvDir = $tmpDir . '/' . $path['dirname'] . '/';
             } else {
-                $csvDir = $tmpDir.'/';
+                $csvDir = $tmpDir . '/';
             }
 
             // 2.4.4系の場合の処理
-            if ($archive->isFileExists($path['dirname'].'/bkup_data.csv')) {
+            if ($archive->isFileExists($path['dirname'] . '/bkup_data.csv')) {
 
                 //$csvDir = $tmpDir.'/'.$fileNames[0];
                 $this->cutOff24($csvDir, 'bkup_data.csv');
 
                 // 2.4.4系の場合の処理
-                if (file_exists($csvDir.'dtb_products_class.csv')) {
+                if (file_exists($csvDir . 'dtb_products_class.csv')) {
                     // 2.11の場合は通さない
-                    if (!file_exists($csvDir.'dtb_class_combination.csv')) {
+                    if (!file_exists($csvDir . 'dtb_class_combination.csv')) {
                         $this->flag_244 = true;
                         // create dtb_shipping
                         $this->fix24Shipping($em, $csvDir);
@@ -140,21 +140,21 @@ class ConfigController extends AbstractController
             }
 
             // 2.13以外全部
-            if (!file_exists($csvDir.'dtb_tax_rule.csv')) {
+            if (!file_exists($csvDir . 'dtb_tax_rule.csv')) {
                 // 税率など
                 $this->fix24baseinfo($em, $csvDir);
             }
 
             $this->flag_4 = false;
             // 4.0/4.1系の場合
-            if (file_exists($csvDir.'dtb_order_item.csv')) {
+            if (file_exists($csvDir . 'dtb_order_item.csv')) {
                 $this->flag_4 = true;
             }
 
             $this->flag_3 = false;
             if ($this->flag_4 == false) {
                 // 3系の場合
-                if (file_exists($csvDir.'dtb_product.csv')) {
+                if (file_exists($csvDir . 'dtb_product.csv')) {
                     $this->flag_3 = true;
                 }
             }
@@ -162,7 +162,7 @@ class ConfigController extends AbstractController
             // 会員・受注のみ移行
             if ($form['customer_order_only']->getData()) {
                 $this->saveCustomerAndOrder($em, $csvDir);
-            // 全データ移行
+                // 全データ移行
             } else {
                 $this->saveCustomer($em, $csvDir);
                 $this->saveProduct($em, $csvDir);
@@ -184,15 +184,7 @@ class ConfigController extends AbstractController
 
     private function saveCustomerAndOrder($em, $csvDir)
     {
-        $em->beginTransaction();
-        $platform = $em->getDatabasePlatform()->getName();
-
-        if ($platform == 'mysql') {
-            $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-            $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-        } else {
-            $em->exec('SET session_replication_role = replica;'); // need super user
-        }
+        $this->beginTransaction($em);
 
         // 会員
         $this->saveToC($em, $csvDir, 'dtb_customer');
@@ -250,7 +242,7 @@ class ConfigController extends AbstractController
     private function saveCustomer($em, $csvDir)
     {
         // 会員系
-        if (file_exists($csvDir.'dtb_customer.csv') && filesize($csvDir.'dtb_customer.csv') > 0) {
+        if (file_exists($csvDir . 'dtb_customer.csv') && filesize($csvDir . 'dtb_customer.csv') > 0) {
             $em->beginTransaction();
 
             $platform = $em->getDatabasePlatform()->getName();
@@ -303,17 +295,17 @@ class ConfigController extends AbstractController
         $tableName = ($tableName) ? $tableName : $csvName;
         $this->resetTable($em, $tableName);
 
-        if (file_exists($tmpDir.$csvName.'.csv') == false) {
+        if (file_exists($tmpDir . $csvName . '.csv') == false) {
             // 無視する
             //$this->addDanger($csvName.'.csv が見つかりませんでした' , 'admin');
             return;
         }
-        if (filesize($tmpDir.$csvName.'.csv') == 0) {
+        if (filesize($tmpDir . $csvName . '.csv') == 0) {
             // 無視する
             return;
         }
 
-        if (($handle = fopen($tmpDir.$csvName.'.csv', 'r')) !== false) {
+        if (($handle = fopen($tmpDir . $csvName . '.csv', 'r')) !== false) {
             // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
@@ -369,12 +361,12 @@ class ConfigController extends AbstractController
                             // 退会が追加された
                             $value[$column] = ($data['del_flg'] == 1) ? '3' : $data['status'];
                         } elseif ($column == 'postal_code') {
-                            $value[$column] = mb_substr(mb_convert_kana($data['zip01'].$data['zip02'], 'a'), 0, 8);
+                            $value[$column] = mb_substr(mb_convert_kana($data['zip01'] . $data['zip02'], 'a'), 0, 8);
                             if (empty($value[$column])) {
                                 $value[$column] = null;
                             }
                         } elseif ($column == 'phone_number') {
-                            $value[$column] = mb_substr(mb_convert_kana($data['tel01'].$data['tel02'].$data['tel03'], 'a'), 0, 14); //14文字制限
+                            $value[$column] = mb_substr(mb_convert_kana($data['tel01'] . $data['tel02'] . $data['tel03'], 'a'), 0, 14); //14文字制限
                             if (empty($value[$column])) {
                                 $value[$column] = null;
                             }
@@ -392,7 +384,7 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'email') {
                             // 退会時はランダムな値に更新
                             if ($data['del_flg'] == 1) {
-                                $value[$column] = StringUtil::random(60).'@dummy.dummy';
+                                $value[$column] = StringUtil::random(60) . '@dummy.dummy';
                             } else {
                                 $value[$column] = empty($data[$column]) ? 'Not null violation' : $data[$column];
                             }
@@ -409,7 +401,7 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'login_date' || $column == 'first_buy_date') {
                             $value[$column] = (!empty($data[$column]) && $data[$column] != '0000-00-00 00:00:00') ? self::convertTz($data[$column]) : null;
                         } elseif ($column == 'secret_key') { // 実験
-                            $value[$column] = uniqid('secret_key_'.mt_rand().'.', true);
+                            $value[$column] = uniqid('secret_key_' . mt_rand() . '.', true);
                         } elseif ($column == 'point') {
                             $value[$column] = empty($data[$column]) ? 0 : (int) $data[$column];
                         } elseif ($column == 'salt') {
@@ -462,7 +454,7 @@ class ConfigController extends AbstractController
             $product_db_name = 'dtb_products';
         }
 
-        if (file_exists($csvDir.$product_db_name.'.csv') && filesize($csvDir.$product_db_name.'.csv') > 0) {
+        if (file_exists($csvDir . $product_db_name . '.csv') && filesize($csvDir . $product_db_name . '.csv') > 0) {
             $em->beginTransaction();
 
             $platform = $em->getDatabasePlatform()->getName();
@@ -475,7 +467,7 @@ class ConfigController extends AbstractController
             }
 
             // 2.11系の処理
-            if (file_exists($csvDir.'dtb_class_combination.csv')) {
+            if (file_exists($csvDir . 'dtb_class_combination.csv')) {
                 $this->fix211classCombination($em, $platform, $csvDir);
             }
 
@@ -504,7 +496,6 @@ class ConfigController extends AbstractController
                 $this->saveToP($em, $csvDir, 'dtb_product_tag');
                 $this->saveToP($em, $csvDir, 'mtb_tag', 'dtb_tag');
                 $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
-
             } else {
                 $this->saveToP($em, $csvDir, 'dtb_products', 'dtb_product');
                 $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');
@@ -523,7 +514,7 @@ class ConfigController extends AbstractController
             }
 
             $this->saveToP($em, $csvDir, 'dtb_category');
-            if (file_exists($csvDir.'mtb_product_type.csv')) {
+            if (file_exists($csvDir . 'mtb_product_type.csv')) {
                 $this->saveToP($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
             }
 
@@ -575,16 +566,16 @@ class ConfigController extends AbstractController
         $tableName = ($tableName) ? $tableName : $csvName;
         $this->resetTable($em, $tableName);
 
-        if (file_exists($tmpDir.$csvName.'.csv') == false) {
+        if (file_exists($tmpDir . $csvName . '.csv') == false) {
             // 無視する
             return;
         }
-        if (filesize($tmpDir.$csvName.'.csv') == 0) {
+        if (filesize($tmpDir . $csvName . '.csv') == 0) {
             // 無視する
             return;
         }
 
-        if (($handle = fopen($tmpDir.$csvName.'.csv', 'r')) !== false) {
+        if (($handle = fopen($tmpDir . $csvName . '.csv', 'r')) !== false) {
             // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
@@ -654,12 +645,10 @@ class ConfigController extends AbstractController
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         }
                     } else {
-                       if ($column == 'id' && $tableName == 'dtb_product') {
+                        if ($column == 'id' && $tableName == 'dtb_product') {
                             $value[$column] = $data['product_id'];
-
                         } elseif ($column == 'id' && $tableName == 'dtb_customer_favorite_product') {
                             $value[$column] = $i;
-
                         } elseif ($column == 'product_status_id') {
                             // 退会が追加された
                             $value[$column] = ($data['del_flg'] == 1) ? '3' : $data['status'];
@@ -668,7 +657,7 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'name') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : '';
 
-                        // カラム名が違うので
+                            // カラム名が違うので
                         } elseif ($column == 'description_list') {
                             $value[$column] = isset($data['main_list_comment'])
                                 ? mb_substr($data['main_list_comment'], 0, 3999)
@@ -682,14 +671,13 @@ class ConfigController extends AbstractController
                                 ? mb_substr($data['comment3'], 0, 3999)
                                 : null;
                         } elseif ($column == 'free_area' && isset($data['sub_title1'])) {
-                            $value[$column] = $data['sub_title1']."\n".$data['sub_comment1']."\n"
-                                .$data['sub_title2']."\n".$data['sub_comment2']."\n"
-                                .$data['sub_title3']."\n".$data['sub_comment3']."\n"
-                                .$data['sub_title4']."\n".$data['sub_comment4']."\n"
-                                .$data['sub_title5']."\n".$data['sub_comment5']."\n"
-                                ;
+                            $value[$column] = $data['sub_title1'] . "\n" . $data['sub_comment1'] . "\n"
+                                . $data['sub_title2'] . "\n" . $data['sub_comment2'] . "\n"
+                                . $data['sub_title3'] . "\n" . $data['sub_comment3'] . "\n"
+                                . $data['sub_title4'] . "\n" . $data['sub_comment4'] . "\n"
+                                . $data['sub_title5'] . "\n" . $data['sub_comment5'] . "\n";
 
-                        // ---> dtb_product_class
+                            // ---> dtb_product_class
                         } elseif ($column == 'sale_type_id') {
                             $value[$column] = isset($data['product_type_id']) ? $data['product_type_id'] : 1;
                         } elseif ($column == 'class_category_id1') {
@@ -715,7 +703,7 @@ class ConfigController extends AbstractController
                             // todo 2.4系の場合、データが足りない
                             $this->stock[$data['product_class_id']] = $value[$column];
 
-                        // class_category
+                            // class_category
                         } elseif ($column == 'class_category_id') {
                             $value[$column] = !empty($data['classcategory_id']) ? $data['classcategory_id'] : 0;
                         } elseif ($column == 'class_name_id') {
@@ -778,7 +766,7 @@ class ConfigController extends AbstractController
                         } elseif (!empty($data['main_list_image'])) {
                             $this->product_images[$data['product_id']] = [$data['main_list_image']];
                         }
-                        for ($sub_image_id=1; $sub_image_id <= 6; $sub_image_id++) {
+                        for ($sub_image_id = 1; $sub_image_id <= 6; $sub_image_id++) {
                             if (!empty($data['sub_large_image' . $sub_image_id])) {
                                 $this->product_images[$data['product_id']][] = $data['sub_large_image' . $sub_image_id];
                             } elseif (!empty($data['sub_image' . $sub_image_id])) {
@@ -845,11 +833,11 @@ class ConfigController extends AbstractController
 
     private function fix24baseinfo($em, $tmpDir)
     {
-        if (!file_exists($tmpDir.'dtb_baseinfo.csv')) {
+        if (!file_exists($tmpDir . 'dtb_baseinfo.csv')) {
             return;
         }
 
-        if (($handle = fopen($tmpDir.'dtb_baseinfo.csv', 'r')) !== false) {
+        if (($handle = fopen($tmpDir . 'dtb_baseinfo.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -869,7 +857,7 @@ class ConfigController extends AbstractController
             }
             fclose($handle);
 
-            $fpcsv = fopen($tmpDir.'dtb_tax_rule.csv', 'a');
+            $fpcsv = fopen($tmpDir . 'dtb_tax_rule.csv', 'a');
             foreach ($add_value as $row) {
                 if ($row === reset($add_value)) {
                     // 最初
@@ -883,7 +871,7 @@ class ConfigController extends AbstractController
 
     private function fix24Shipping($em, $tmpDir)
     {
-        if (($handle = fopen($tmpDir.'dtb_order.csv', 'r')) !== false) {
+        if (($handle = fopen($tmpDir . 'dtb_order.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -907,7 +895,7 @@ class ConfigController extends AbstractController
                 if (!empty($value['shipping_date'])) {
                     // 変な文字が来る 18/12/29(土)
                     preg_match_all('/[\d.]+/', $value['shipping_date'], $matches);
-                    $value['shipping_date'] = date('Y-m-d', mktime(0, 0, 0, $matches[0][1], $matches[0][2], '20'.$matches[0][0]));
+                    $value['shipping_date'] = date('Y-m-d', mktime(0, 0, 0, $matches[0][1], $matches[0][2], '20' . $matches[0][0]));
                 }
                 $value['del_flg'] = $data['del_flg'];
                 $value['order_id'] = $data['order_id'];
@@ -921,7 +909,7 @@ class ConfigController extends AbstractController
 
             fclose($handle);
 
-            $fpcsv = fopen($tmpDir.'dtb_shipping.csv', 'a');
+            $fpcsv = fopen($tmpDir . 'dtb_shipping.csv', 'a');
 
             foreach ($add_value as $row) {
                 if ($row === reset($add_value)) {
@@ -937,7 +925,7 @@ class ConfigController extends AbstractController
     // 2.4系のclassを追加する
     private function fix24ProductsClass($em, $tmpDir)
     {
-        if (($handle = fopen($tmpDir.'dtb_products_class.csv', 'r')) !== false) {
+        if (($handle = fopen($tmpDir . 'dtb_products_class.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -961,7 +949,7 @@ class ConfigController extends AbstractController
             fclose($handle);
 
             if (!empty($add_value)) {
-                $fpcsv = fopen($tmpDir.'dtb_products_class.csv', 'a');
+                $fpcsv = fopen($tmpDir . 'dtb_products_class.csv', 'a');
                 foreach ($add_value as $row) {
                     fputcsv($fpcsv, array_values($row));
                 }
@@ -972,7 +960,7 @@ class ConfigController extends AbstractController
 
     private function fix211classCombination($em, $platform, $tmpDir)
     {
-        if (($handle = fopen($tmpDir.'dtb_class_combination.csv', 'r')) !== false) {
+        if (($handle = fopen($tmpDir . 'dtb_class_combination.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -1070,7 +1058,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM '.$tableName);
+        $em->exec('DELETE FROM ' . $tableName);
 
         $i = 1;
         $batchSize = 20;
@@ -1109,7 +1097,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM '.$tableName);
+        $em->exec('DELETE FROM ' . $tableName);
 
         $i = 1;
         $batchSize = 20;
@@ -1145,7 +1133,7 @@ class ConfigController extends AbstractController
         $tbl_flg = false;
         $col_flg = false;
 
-        if (($handle = fopen($tmpDir.$csvName, 'r')) !== false) {
+        if (($handle = fopen($tmpDir . $csvName, 'r')) !== false) {
             $fpcsv = '';
             while (($row = fgetcsv($handle)) !== false) {
                 //空白行のときはテーブル変更
@@ -1185,7 +1173,7 @@ class ConfigController extends AbstractController
                             $allow_zero = false;
                             $tbl_flg = true;
 
-                            $fpcsv = fopen($tmpDir.$tableName.'.csv', 'w');
+                            $fpcsv = fopen($tmpDir . $tableName . '.csv', 'w');
                             break;
 
                         case 'dtb_other_deliv':
@@ -1194,12 +1182,12 @@ class ConfigController extends AbstractController
                             $allow_zero = true;
                             $tbl_flg = true;
 
-                            $fpcsv = fopen($tmpDir.$tableName.'.csv', 'w');
+                            $fpcsv = fopen($tmpDir . $tableName . '.csv', 'w');
                             break;
                         case 'dtb_index_list': // ゴミデータが交じるので
                             $tbl_flg = true;
                             $tableName = $row[0];
-                            $fpcsv = fopen($tmpDir.$tableName.'.csv', 'w');
+                            $fpcsv = fopen($tmpDir . $tableName . '.csv', 'w');
                             break;
 
                         case 'dtb_member':
@@ -1210,7 +1198,7 @@ class ConfigController extends AbstractController
                             $tableName = $row[0];
                             $allow_zero = true;
                             $tbl_flg = true;
-                            $fpcsv = fopen($tmpDir.$tableName.'.csv', 'w');
+                            $fpcsv = fopen($tmpDir . $tableName . '.csv', 'w');
                             break;
                     }
                     continue;
@@ -1227,8 +1215,8 @@ class ConfigController extends AbstractController
 
     private function setIdSeq($em, $tableName)
     {
-        $max = $em->fetchOne('SELECT coalesce(max(id), 0) + 1  FROM '.$tableName);
-        $seq = $tableName.'_id_seq';
+        $max = $em->fetchOne('SELECT coalesce(max(id), 0) + 1  FROM ' . $tableName);
+        $seq = $tableName . '_id_seq';
         $count = $em->fetchOne("select count(*) from pg_class where relname = '$seq';");
         if ($count) {
             $em->exec("SELECT setval('$seq', $max);");
@@ -1238,7 +1226,7 @@ class ConfigController extends AbstractController
     private function saveOrder($em, $csvDir)
     {
         // 会員系
-        if (file_exists($csvDir.'dtb_order.csv') && filesize($csvDir.'dtb_order.csv') > 0) {
+        if (file_exists($csvDir . 'dtb_order.csv') && filesize($csvDir . 'dtb_order.csv') > 0) {
             $em->beginTransaction();
 
             $platform = $em->getDatabasePlatform()->getName();
@@ -1338,19 +1326,19 @@ class ConfigController extends AbstractController
         $tableName = ($tableName) ? $tableName : $csvName;
         $this->resetTable($em, $tableName);
 
-        if (file_exists($tmpDir.$csvName.'.csv') == false) {
+        if (file_exists($tmpDir . $csvName . '.csv') == false) {
             // 無視する
             //$this->addDanger($csvName.'.csv が見つかりませんでした' , 'admin');
             return;
         }
-        if (filesize($tmpDir.$csvName.'.csv') == 0) {
+        if (filesize($tmpDir . $csvName . '.csv') == 0) {
             // 無視する
-            $this->addWarning($csvName.'.csv のデータがありません。', 'admin');
+            $this->addWarning($csvName . '.csv のデータがありません。', 'admin');
 
             return;
         }
 
-        if (($handle = fopen($tmpDir.$csvName.'.csv', 'r')) !== false) {
+        if (($handle = fopen($tmpDir . $csvName . '.csv', 'r')) !== false) {
             // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
@@ -1452,12 +1440,12 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'message' || $column == 'note') {
                             $value[$column] = empty($data[$column]) ? null : mb_substr($data[$column], 0, 4000);
                         } elseif ($column == 'postal_code') {
-                            $value[$column] = mb_substr(mb_convert_kana($data['zip01'].$data['zip02'], 'a'), 0, 8);
+                            $value[$column] = mb_substr(mb_convert_kana($data['zip01'] . $data['zip02'], 'a'), 0, 8);
                             if (empty($value[$column])) {
                                 $value[$column] = null;
                             }
                         } elseif ($column == 'phone_number') {
-                            $value[$column] = mb_substr(mb_convert_kana($data['tel01'].$data['tel02'].$data['tel03'], 'a'), 0, 14); //14文字制限
+                            $value[$column] = mb_substr(mb_convert_kana($data['tel01'] . $data['tel02'] . $data['tel03'], 'a'), 0, 14); //14文字制限
                             if (empty($value[$column])) {
                                 $value[$column] = null;
                             }
@@ -1470,7 +1458,7 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'delivery_fee_total') {
                             $value[$column] = empty($data['deliv_fee']) ? 0 : $data['deliv_fee'];
 
-                        // --> shipping
+                            // --> shipping
                         } elseif ($column == 'delivery_date') {
                             $value[$column] = empty($data['date']) ? null : $data['date'];
                         } elseif ($column == 'shipping_date') {
@@ -1478,7 +1466,7 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'visible' /*&& $tableName == 'dtb_payment'*/) {
                             $value[$column] = 0;
 
-                        // --> deliv
+                            // --> deliv
                         } elseif ($column == 'sale_type_id') {
                             $value[$column] = isset($data['product_type_id']) ? $data['product_type_id'] : 1;
                         } elseif ($column == 'description') {
@@ -1495,7 +1483,7 @@ class ConfigController extends AbstractController
                             }
                         } elseif ($column == 'fee') {
                             $value[$column] = !empty($data['fee']) ? $data['fee'] : 0;
-                        // --> payment
+                            // --> payment
                         } elseif ($column == 'fixed') {
                             $value[$column] = 1;
                         } elseif ($column == 'rule_max') {
@@ -1510,10 +1498,9 @@ class ConfigController extends AbstractController
                                 $value[$column] = isset($data['rule_min']) && strlen($data['rule_min']) > 0 ? $data['rule_min'] : null;
                             } else {
                                 // 2.13
-                                $value[$column] = !empty($data['rule_max']) ? $data['rule_max'] :
-                                    (!empty($data['rule']) ? $data['rule'] : null ) ;
+                                $value[$column] = !empty($data['rule_max']) ? $data['rule_max'] : (!empty($data['rule']) ? $data['rule'] : null);
                             }
-                        // --> dtb_order_item
+                            // --> dtb_order_item
                         } elseif ($column == 'class_category_name1') {
                             $value[$column] = isset($data['classcategory_name1']) && strlen($data['classcategory_name1']) > 0 ? $data['classcategory_name1'] : null;
                         } elseif ($column == 'class_category_name2') {
@@ -1637,8 +1624,10 @@ class ConfigController extends AbstractController
                         if (isset($data['country_id']) && $data['country_id'] === '0') {
                             $value['country_id'] = null;
                         }
-                        if (isset($data['product_id']) && $data['product_id'] === '0'
-                            && isset($data['product_class_id']) && $data['product_class_id'] === '0') {
+                        if (
+                            isset($data['product_id']) && $data['product_id'] === '0'
+                            && isset($data['product_class_id']) && $data['product_class_id'] === '0'
+                        ) {
                             $value['product_id'] = null;
                             $value['product_class_id'] = null;
                         }
@@ -1781,7 +1770,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $i = $em->fetchOne('SELECT max(id) + 1  FROM '.$tableName);
+        $i = $em->fetchOne('SELECT max(id) + 1  FROM ' . $tableName);
         $batchSize = 20;
         foreach ($this->order_item as $order_id => $type) {
             foreach ($type as $key => $value) {
@@ -1791,38 +1780,38 @@ class ConfigController extends AbstractController
                 $data['shipping_id'] = null;
 
                 switch ($key) {
-                case 'deliv_fee':
-                    $data['order_item_type_id'] = 2;
-                    $data['product_name'] = '送料';
-                    $data['price'] = $value['price'];
-                    $data['tax_type_id'] = 1; // 課税
-                    $data['tax_display_type_id'] = 2; // 税込表示
-                    if (isset($this->shipping_id[$order_id][0])) {
-                        $data['shipping_id'] = $this->shipping_id[$order_id][0];
-                    }
-                    break;
-                case 'charge':
-                    $data['order_item_type_id'] = 3;
-                    $data['product_name'] = '手数料';
-                    $data['price'] = $value['price'];
-                    $data['tax_type_id'] = 1; // 課税
-                    $data['tax_display_type_id'] = 2; // 税込表示
-                    break;
-                case 'discount':
-                    $data['order_item_type_id'] = 4;
-                    $data['product_name'] = '割引';
-                    $data['price'] = $value['price'] * -1;
-                    $data['tax_type_id'] = 1; // 課税
-                    $data['tax_display_type_id'] = 2; // 税込表示
-                    break;
-                case 'use_point':
-                    $data['order_item_type_id'] = 6;
-                    $data['product_name'] = 'ポイント';
-                    $data['price'] = $value['price'] * -1; // use_pointはポイント数のため、正確な値はだせない.ここでは1pt1円として登録する.
-                    $data['tax_type_id'] = 2;   // 不課税
-                    $data['tax_display_type_id'] = 2; // 税込表示
-                    $data['tax_rate'] = 0;
-                    break;
+                    case 'deliv_fee':
+                        $data['order_item_type_id'] = 2;
+                        $data['product_name'] = '送料';
+                        $data['price'] = $value['price'];
+                        $data['tax_type_id'] = 1; // 課税
+                        $data['tax_display_type_id'] = 2; // 税込表示
+                        if (isset($this->shipping_id[$order_id][0])) {
+                            $data['shipping_id'] = $this->shipping_id[$order_id][0];
+                        }
+                        break;
+                    case 'charge':
+                        $data['order_item_type_id'] = 3;
+                        $data['product_name'] = '手数料';
+                        $data['price'] = $value['price'];
+                        $data['tax_type_id'] = 1; // 課税
+                        $data['tax_display_type_id'] = 2; // 税込表示
+                        break;
+                    case 'discount':
+                        $data['order_item_type_id'] = 4;
+                        $data['product_name'] = '割引';
+                        $data['price'] = $value['price'] * -1;
+                        $data['tax_type_id'] = 1; // 課税
+                        $data['tax_display_type_id'] = 2; // 税込表示
+                        break;
+                    case 'use_point':
+                        $data['order_item_type_id'] = 6;
+                        $data['product_name'] = 'ポイント';
+                        $data['price'] = $value['price'] * -1; // use_pointはポイント数のため、正確な値はだせない.ここでは1pt1円として登録する.
+                        $data['tax_type_id'] = 2;   // 不課税
+                        $data['tax_display_type_id'] = 2; // 税込表示
+                        $data['tax_rate'] = 0;
+                        break;
                 }
 
                 if ($data['rounding_type_id'] == 2) {
@@ -1872,9 +1861,9 @@ class ConfigController extends AbstractController
         $platform = $em->getDatabasePlatform()->getName();
 
         if ($platform == 'mysql') {
-            $em->exec('DELETE FROM '.$tableName);
+            $em->exec('DELETE FROM ' . $tableName);
         } else {
-            $em->exec('DELETE FROM '.$tableName);
+            $em->exec('DELETE FROM ' . $tableName);
         }
     }
 
@@ -1943,5 +1932,18 @@ class ConfigController extends AbstractController
             }
         }
         return $data;
+    }
+
+    private function beginTransaction($em)
+    {
+        $em->beginTransaction();
+        $platform = $em->getDatabasePlatform()->getName();
+
+        if ($platform == 'mysql') {
+            $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
+            $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'");
+        } else {
+            $em->exec('SET session_replication_role = replica;');
+        }
     }
 }
