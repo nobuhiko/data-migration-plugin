@@ -77,7 +77,9 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         $customers = $this->entityManager->getRepository(Customer::class)->findAll();
         self::assertEquals($c, count($customers));
         // $customersをphpunitの結果に出力する
-        var_dump($customers);
+        foreach ($customers as $customer) {
+            fwrite(STDOUT, sprintf("Customer ID: %d, Name: %s\n", $customer->getId(), $customer->getName01()));
+        }
 
         if ($p > 0) {
             $products = $this->entityManager->getRepository(Product::class)->findAll();
