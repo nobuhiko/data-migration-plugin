@@ -8,8 +8,8 @@ jobs:
       fail-fast: false
       matrix:
         eccube_version: ["4.2", "4.3"]
-        php: ["8.3"]
-        db: ["pgsql"]
+        php: ["7.4", "8.3"]
+        db: ["mysql","pgsql"]
         plugin_code: ["DataMigration42"]
         include:
           - db: mysql

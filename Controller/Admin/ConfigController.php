@@ -159,23 +159,36 @@ class ConfigController extends AbstractController
                 }
             }
 
+            $em->beginTransaction();
+            $platform = $em->getDatabasePlatform()->getName();
 
-            // postgresqlの場合は、シーケンスをリセットする
-            if ($em->getDatabasePlatform()->getName() == 'postgresql') {
-                $tables = $em->getSchemaManager()->listTables();
-                foreach ($tables as $table) {
-                    $this->disableTrigger($em, $table->getName());
+            if ($platform == 'mysql') {
+                $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
+                $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
+            }
+            try {
+
+                // 会員・受注のみ移行
+                if ($form['customer_order_only']->getData()) {
+                    $this->saveCustomerAndOrder($em, $csvDir);
+                    // 全データ移行
+                } else {
+                    $this->saveCustomer($em, $csvDir);
+                    $this->saveProduct($em, $csvDir);
+                    $this->saveOrder($em, $csvDir);
                 }
+
+
+                $em->commit();
+                $this->addSuccess('データ登録しました。', 'admin');
+            } catch (\Exception $e) {
+                $em->rollback();
+                $this->addDanger('データ登録に失敗しました。', 'admin');
+                //throw $e;
             }
 
-            // 会員・受注のみ移行
-            if ($form['customer_order_only']->getData()) {
-                $this->saveCustomerAndOrder($em, $csvDir);
-                // 全データ移行
-            } else {
-                $this->saveCustomer($em, $csvDir);
-                $this->saveProduct($em, $csvDir);
-                $this->saveOrder($em, $csvDir);
+            if ($platform == 'mysql') {
+                $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
             }
 
             // 削除
@@ -193,21 +206,6 @@ class ConfigController extends AbstractController
 
     private function saveCustomerAndOrder($em, $csvDir)
     {
-        $em->beginTransaction();
-        $platform = $em->getDatabasePlatform()->getName();
-
-        if ($platform == 'mysql') {
-            $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-            $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-        } else {
-            $this->disableTrigger($em, 'dtb_customer');
-            $this->disableTrigger($em, 'dtb_customer_address');
-            $this->disableTrigger($em, 'dtb_order');
-            $this->disableTrigger($em, 'dtb_order_item');
-            $this->disableTrigger($em, 'dtb_shipping');
-            $this->disableTrigger($em, 'dtb_mail_history');
-        }
-
         // 会員
         $this->saveToC($em, $csvDir, 'dtb_customer');
 
@@ -246,8 +244,7 @@ class ConfigController extends AbstractController
             $this->saveOrderItem($em);
         }
 
-        if ($platform == 'mysql') {
-            $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+        if ($em->getDatabasePlatform()->getName() == 'mysql') {
         } else {
             $this->setIdSeq($em, 'dtb_customer');
             $this->setIdSeq($em, 'dtb_customer_address');
@@ -257,64 +254,43 @@ class ConfigController extends AbstractController
             $this->setIdSeq($em, 'dtb_mail_history');
         }
 
-        $em->commit();
-        $this->addSuccess('会員データ・受注データを登録しました。', 'admin');
+        //$this->addSuccess('会員データ・受注データを登録しました。', 'admin');
     }
 
     private function saveCustomer($em, $csvDir)
     {
         // 会員系
         if (file_exists($csvDir . 'dtb_customer.csv') && filesize($csvDir . 'dtb_customer.csv') > 0) {
-            $em->beginTransaction();
-            try {
 
-                $platform = $em->getDatabasePlatform()->getName();
+            $this->saveToC($em, $csvDir, 'mtb_job', null, true);
+            $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
 
-                if ($platform == 'mysql') {
-                    $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-                    $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-                } else {
-                    $this->disableTrigger($em, 'dtb_member');
-                    $this->disableTrigger($em, 'dtb_customer');
-                    $this->disableTrigger($em, 'dtb_customer_address');
-                }
-
-                $this->saveToC($em, $csvDir, 'mtb_job', null, true);
-                $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
-
-                if ($this->flag_4) {
-                    $this->saveToC($em, $csvDir, 'mtb_customer_order_status', null, true);
-                    $this->saveToC($em, $csvDir, 'mtb_customer_status', null, true);
-                }
-
-                $this->saveToC($em, $csvDir, 'dtb_customer');
-                if ($this->flag_4) {
-                    $this->saveToC($em, $csvDir, 'dtb_customer_address');
-                } else if ($this->flag_3) {
-                    // fixme 余計なデータが移行される
-                    $this->saveToC($em, $csvDir, 'dtb_customer_address');
-                } else {
-                    $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1);
-                }
-
-                $this->saveToC($em, $csvDir, 'mtb_authority', null, true);
-                $this->saveToC($em, $csvDir, 'dtb_member', null, true);
-
-                if ($platform == 'mysql') {
-                    $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
-                } else {
-                    $this->setIdSeq($em, 'dtb_member');
-                    $this->setIdSeq($em, 'dtb_customer');
-                    $this->setIdSeq($em, 'dtb_customer_address');
-                }
-                $em->commit();
-            } catch (\Exception $e) {
-                $em->rollback();
-                throw $e;
+            if ($this->flag_4) {
+                $this->saveToC($em, $csvDir, 'mtb_customer_order_status', null, true);
+                $this->saveToC($em, $csvDir, 'mtb_customer_status', null, true);
             }
-            $this->addSuccess('会員データ登録しました。', 'admin');
-        } else {
-            $this->addDanger('会員データが見つかりませんでした', 'admin');
+
+            $this->saveToC($em, $csvDir, 'dtb_customer');
+            if ($this->flag_4) {
+                $this->saveToC($em, $csvDir, 'dtb_customer_address');
+            } else if ($this->flag_3) {
+                // fixme 余計なデータが移行される
+                $this->saveToC($em, $csvDir, 'dtb_customer_address');
+            } else {
+                $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1);
+            }
+
+            $this->saveToC($em, $csvDir, 'mtb_authority', null, true);
+            $this->saveToC($em, $csvDir, 'dtb_member', null, true);
+
+            if ($em->getDatabasePlatform()->getName() == 'mysql') {
+            } else {
+                $this->setIdSeq($em, 'dtb_member');
+                $this->setIdSeq($em, 'dtb_customer');
+                $this->setIdSeq($em, 'dtb_customer_address');
+            }
+
+            //$this->addSuccess('会員データ登録しました。', 'admin');
         }
     }
 
@@ -483,123 +459,98 @@ class ConfigController extends AbstractController
         }
 
         if (file_exists($csvDir . $product_db_name . '.csv') && filesize($csvDir . $product_db_name . '.csv') > 0) {
-            $em->beginTransaction();
-            try {
 
-                $platform = $em->getDatabasePlatform()->getName();
+            $platform = $em->getDatabasePlatform()->getName();
 
-                if ($platform == 'mysql') {
-                    $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-                    $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-                } else {
-                    $this->disableTrigger($em, 'dtb_product');
-                    $this->disableTrigger($em, 'dtb_product_class');
-                    $this->disableTrigger($em, 'dtb_class_category');
-                    $this->disableTrigger($em, 'dtb_class_name');
-                    $this->disableTrigger($em, 'dtb_category');
-                    $this->disableTrigger($em, 'dtb_product_stock');
-                    $this->disableTrigger($em, 'dtb_product_image');
-                    $this->disableTrigger($em, 'dtb_product_tag');
-                    $this->disableTrigger($em, 'dtb_tag');
-                    $this->disableTrigger($em, 'dtb_customer_favorite_product');
-                }
+            // 2.11系の処理
+            if (file_exists($csvDir . 'dtb_class_combination.csv')) {
+                $this->fix211classCombination($em, $platform, $csvDir);
+            }
 
-                // 2.11系の処理
-                if (file_exists($csvDir . 'dtb_class_combination.csv')) {
-                    $this->fix211classCombination($em, $platform, $csvDir);
-                }
+            if ($this->flag_4) {
+                $this->saveToC($em, $csvDir, 'mtb_product_status', null, true);
+                $this->saveToC($em, $csvDir, 'mtb_sale_type', null, true);
+                $this->saveToP($em, $csvDir, 'dtb_product');
+                $this->saveToO($em, $csvDir, 'dtb_delivery_duration', null, true);
+                $this->saveToP($em, $csvDir, 'dtb_product_class');
+                $this->saveToP($em, $csvDir, 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_class_name');
+                $this->saveToP($em, $csvDir, 'dtb_product_category');
+                $this->saveToP($em, $csvDir, 'dtb_product_stock');
+                $this->saveToP($em, $csvDir, 'dtb_product_image');
+                $this->saveToP($em, $csvDir, 'dtb_tag');
+                $this->saveToP($em, $csvDir, 'dtb_product_tag');
+                $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
+            } else if ($this->flag_3) {
+                $this->saveToP($em, $csvDir, 'dtb_product');
+                $this->saveToP($em, $csvDir, 'dtb_product_class');
+                $this->saveToP($em, $csvDir, 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_class_name');
+                $this->saveToP($em, $csvDir, 'dtb_product_category');
+                $this->saveToP($em, $csvDir, 'dtb_product_stock');
+                $this->saveToP($em, $csvDir, 'dtb_product_image');
+                $this->saveToP($em, $csvDir, 'dtb_product_tag');
+                $this->saveToP($em, $csvDir, 'mtb_tag', 'dtb_tag');
+                $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
+            } else {
+                $this->saveToP($em, $csvDir, 'dtb_products', 'dtb_product');
+                $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');
+                $this->saveToP($em, $csvDir, 'dtb_classcategory', 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_class', 'dtb_class_name');
+                $this->saveToP($em, $csvDir, 'dtb_product_categories', 'dtb_product_category');
+                $this->saveToP($em, $csvDir, 'dtb_product_status', 'dtb_product_tag');
+                $this->saveToP($em, $csvDir, 'mtb_status', 'dtb_tag');
 
-                if ($this->flag_4) {
-                    $this->saveToC($em, $csvDir, 'mtb_product_status', null, true);
-                    $this->saveToC($em, $csvDir, 'mtb_sale_type', null, true);
-                    $this->saveToP($em, $csvDir, 'dtb_product');
-                    $this->saveToO($em, $csvDir, 'dtb_delivery_duration', null, true);
-                    $this->saveToP($em, $csvDir, 'dtb_product_class');
-                    $this->saveToP($em, $csvDir, 'dtb_class_category');
-                    $this->saveToP($em, $csvDir, 'dtb_class_name');
-                    $this->saveToP($em, $csvDir, 'dtb_product_category');
-                    $this->saveToP($em, $csvDir, 'dtb_product_stock');
-                    $this->saveToP($em, $csvDir, 'dtb_product_image');
-                    $this->saveToP($em, $csvDir, 'dtb_tag');
-                    $this->saveToP($em, $csvDir, 'dtb_product_tag');
-                    $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
-                } else if ($this->flag_3) {
-                    $this->saveToP($em, $csvDir, 'dtb_product');
-                    $this->saveToP($em, $csvDir, 'dtb_product_class');
-                    $this->saveToP($em, $csvDir, 'dtb_class_category');
-                    $this->saveToP($em, $csvDir, 'dtb_class_name');
-                    $this->saveToP($em, $csvDir, 'dtb_product_category');
-                    $this->saveToP($em, $csvDir, 'dtb_product_stock');
-                    $this->saveToP($em, $csvDir, 'dtb_product_image');
-                    $this->saveToP($em, $csvDir, 'dtb_product_tag');
-                    $this->saveToP($em, $csvDir, 'mtb_tag', 'dtb_tag');
-                    $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
-                } else {
-                    $this->saveToP($em, $csvDir, 'dtb_products', 'dtb_product');
-                    $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');
-                    $this->saveToP($em, $csvDir, 'dtb_classcategory', 'dtb_class_category');
-                    $this->saveToP($em, $csvDir, 'dtb_class', 'dtb_class_name');
-                    $this->saveToP($em, $csvDir, 'dtb_product_categories', 'dtb_product_category');
-                    $this->saveToP($em, $csvDir, 'dtb_product_status', 'dtb_product_tag');
-                    $this->saveToP($em, $csvDir, 'mtb_status', 'dtb_tag');
+                $this->saveToP($em, $csvDir, 'dtb_customer_favorite_products', 'dtb_customer_favorite_product');
 
-                    $this->saveToP($em, $csvDir, 'dtb_customer_favorite_products', 'dtb_customer_favorite_product');
+                // 在庫
+                $this->saveStock($em);
+                // 画像
+                $this->saveProductImage($em);
+            }
 
-                    // 在庫
-                    $this->saveStock($em);
-                    // 画像
-                    $this->saveProductImage($em);
-                }
+            $this->saveToP($em, $csvDir, 'dtb_category');
+            if (file_exists($csvDir . 'mtb_product_type.csv')) {
+                $this->saveToP($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
+            }
 
-                $this->saveToP($em, $csvDir, 'dtb_category');
-                if (file_exists($csvDir . 'mtb_product_type.csv')) {
-                    $this->saveToP($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
-                }
+            // 削除済み商品を4系のデータ構造に合わせる
+            $this->fixDeletedProduct($em);
 
-                // 削除済み商品を4系のデータ構造に合わせる
-                $this->fixDeletedProduct($em);
+            // リレーションエラーになるので
+            $em->exec('DELETE FROM dtb_cart');
+            $em->exec('DELETE FROM dtb_cart_item');
 
-                // リレーションエラーになるので
-                $em->exec('DELETE FROM dtb_cart');
-                $em->exec('DELETE FROM dtb_cart_item');
+            // 外部キー制約エラーになるデータを消す
+            $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
+            $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
+            $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
 
-                // 外部キー制約エラーになるデータを消す
-                $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
-                $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
-                $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
-
-                $em->exec('delete from dtb_product_tag where id in (
+            $em->exec('delete from dtb_product_tag where id in (
                 select id from (select t1.id from dtb_product_tag t1 left join dtb_tag t2 on t1.tag_id = t2.id where t2.id is null) as tmp
             );');
-                $em->exec('delete from dtb_product_tag where id in (
+            $em->exec('delete from dtb_product_tag where id in (
                 select id from (select t1.id from dtb_product_tag t1 left join dtb_product t2 on t1.product_id = t2.id where t2.id is null) as tmp
             );');
 
-                if ($platform == 'mysql') {
-                    $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
-                } else {
-                    // シーケンスを進めてあげないといけない
-                    $this->setIdSeq($em, 'dtb_product');
-                    $this->setIdSeq($em, 'dtb_product_class');
-                    $this->setIdSeq($em, 'dtb_class_category');
-                    $this->setIdSeq($em, 'dtb_class_name');
-                    $this->setIdSeq($em, 'dtb_category');
-                    $this->setIdSeq($em, 'dtb_product_stock');
-                    $this->setIdSeq($em, 'dtb_product_image');
-                    $this->setIdSeq($em, 'dtb_product_tag');
-                    $this->setIdSeq($em, 'dtb_tag');
-                    $this->setIdSeq($em, 'dtb_customer_favorite_product');
-                }
-
-                $em->commit();
-            } catch (\Exception $e) {
-                $em->rollback();
-                throw $e;
+            if ($platform == 'mysql') {
+            } else {
+                // シーケンスを進めてあげないといけない
+                $this->setIdSeq($em, 'dtb_product');
+                $this->setIdSeq($em, 'dtb_product_class');
+                $this->setIdSeq($em, 'dtb_class_category');
+                $this->setIdSeq($em, 'dtb_class_name');
+                $this->setIdSeq($em, 'dtb_category');
+                $this->setIdSeq($em, 'dtb_product_stock');
+                $this->setIdSeq($em, 'dtb_product_image');
+                $this->setIdSeq($em, 'dtb_product_tag');
+                $this->setIdSeq($em, 'dtb_tag');
+                $this->setIdSeq($em, 'dtb_customer_favorite_product');
             }
 
-            $this->addSuccess('商品データを登録しました。', 'admin');
-        } else {
-            $this->addDanger('商品データがが見つかりませんでした', 'admin');
+
+
+            //$this->addSuccess('商品データを登録しました。', 'admin');
         }
     }
 
@@ -1926,7 +1877,6 @@ class ConfigController extends AbstractController
         if ($count) {
             $em->exec("SELECT setval('$seq', $max);");
         }
-        $em->exec('ALTER TABLE ONLY ' . $tableName . ' ENABLE TRIGGER ALL;');
     }
 
 
