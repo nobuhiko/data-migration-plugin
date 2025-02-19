@@ -151,14 +151,22 @@ class ConfigController extends AbstractController
                 }
             }
 
-            // 会員・受注のみ移行
-            if ($form['customer_order_only']->getData()) {
-                $this->saveCustomerAndOrder($em, $csvDir);
-                // 全データ移行
-            } else {
-                $this->saveCustomer($em, $csvDir);
-                $this->saveProduct($em, $csvDir);
-                $this->saveOrder($em, $csvDir);
+            $this->beginTransaction($em);
+
+            try {
+                // 会員・受注のみ移行
+                if ($form['customer_order_only']->getData()) {
+                    $this->saveCustomerAndOrder($em, $csvDir);
+                    // 全データ移行
+                } else {
+                    $this->saveCustomer($em, $csvDir);
+                    $this->saveProduct($em, $csvDir);
+                    $this->saveOrder($em, $csvDir);
+                }
+                $this->commitTransaction($em);
+            } catch (\Exception $e) {
+                $this->rollbackTransaction($em);
+                throw $e;
             }
 
             // 削除
@@ -176,90 +184,75 @@ class ConfigController extends AbstractController
 
     private function saveCustomerAndOrder($em, $csvDir)
     {
-        $this->beginTransaction($em);
-        try {
-            // 会員
-            $this->saveToC($em, $csvDir, 'dtb_customer');
+        // 会員
+        $this->saveToC($em, $csvDir, 'dtb_customer');
 
-            if ($this->flag_4) {
-                $this->saveToC($em, $csvDir, 'dtb_customer_address');
-                $this->saveToO($em, $csvDir, 'dtb_delivery_time');
-            } else if ($this->flag_3) {
-                $this->saveToC($em, $csvDir, 'dtb_customer_address');
-                $this->saveToO($em, $csvDir, 'dtb_delivery_time');
-            } else {
-                $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1/*$index*/);
-            }
-
-            // 受注
-            $this->saveToO($em, $csvDir, 'dtb_order');
-            $this->saveToO($em, $csvDir, 'dtb_shipping');
-            $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
-            if ($this->flag_4) {
-                $this->saveToO($em, $csvDir, 'dtb_order_item');
-            } else {
-                $this->saveToO($em, $csvDir, 'dtb_order_detail', 'dtb_order_item', true);
-            }
-
-            if (!empty($this->order_item)) {
-                // すでに移行されている税率設定から取得する
-                $sql = 'SELECT * FROM dtb_tax_rule WHERE product_id IS NULL AND product_class_id IS NULL ORDER BY apply_date DESC';
-                $stmt = $em->query($sql);
-                $tax_rules = $stmt->fetchAllAssociative();
-                foreach ($tax_rules as $tax_rule) {
-                    $this->tax_rule[$tax_rule['apply_date']] = [
-                        'rounding_type_id' => $tax_rule['rounding_type_id'],
-                        'tax_rate' => $tax_rule['tax_rate'],
-                        'apply_date' => $tax_rule['apply_date'],
-                    ];
-                }
-                $this->saveOrderItem($em);
-            }
-
-            $this->commitTransaction($em);
-            $em->commit();
-            $this->addSuccess('会員データ・受注データを登録しました。', 'admin');
-        } catch (\Exception $e) {
-            $this->rollbackTransaction($em);
-            throw $e;
+        if ($this->flag_4) {
+            $this->saveToC($em, $csvDir, 'dtb_customer_address');
+            $this->saveToO($em, $csvDir, 'dtb_delivery_time');
+        } else if ($this->flag_3) {
+            $this->saveToC($em, $csvDir, 'dtb_customer_address');
+            $this->saveToO($em, $csvDir, 'dtb_delivery_time');
+        } else {
+            $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1/*$index*/);
         }
+
+        // 受注
+        $this->saveToO($em, $csvDir, 'dtb_order');
+        $this->saveToO($em, $csvDir, 'dtb_shipping');
+        $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
+        if ($this->flag_4) {
+            $this->saveToO($em, $csvDir, 'dtb_order_item');
+        } else {
+            $this->saveToO($em, $csvDir, 'dtb_order_detail', 'dtb_order_item', true);
+        }
+
+        if (!empty($this->order_item)) {
+            // すでに移行されている税率設定から取得する
+            $sql = 'SELECT * FROM dtb_tax_rule WHERE product_id IS NULL AND product_class_id IS NULL ORDER BY apply_date DESC';
+            $stmt = $em->query($sql);
+            $tax_rules = $stmt->fetchAllAssociative();
+            foreach ($tax_rules as $tax_rule) {
+                $this->tax_rule[$tax_rule['apply_date']] = [
+                    'rounding_type_id' => $tax_rule['rounding_type_id'],
+                    'tax_rate' => $tax_rule['tax_rate'],
+                    'apply_date' => $tax_rule['apply_date'],
+                ];
+            }
+            $this->saveOrderItem($em);
+        }
+        $this->addSuccess('会員データ・受注データを登録しました。', 'admin');
     }
 
     private function saveCustomer($em, $csvDir)
     {
         // 会員系
         if (file_exists($csvDir . 'dtb_customer.csv') && filesize($csvDir . 'dtb_customer.csv') > 0) {
-            $this->beginTransaction($em);
 
-            try {
 
-                $this->saveToC($em, $csvDir, 'mtb_job', null, true);
-                $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
+            $this->saveToC($em, $csvDir, 'mtb_job', null, true);
+            $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
 
-                if ($this->flag_4) {
-                    $this->saveToC($em, $csvDir, 'mtb_customer_order_status', null, true);
-                    $this->saveToC($em, $csvDir, 'mtb_customer_status', null, true);
-                }
-
-                $this->saveToC($em, $csvDir, 'dtb_customer');
-                if ($this->flag_4) {
-                    $this->saveToC($em, $csvDir, 'dtb_customer_address');
-                } else if ($this->flag_3) {
-                    // fixme 余計なデータが移行される
-                    $this->saveToC($em, $csvDir, 'dtb_customer_address');
-                } else {
-                    $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1);
-                }
-
-                $this->saveToC($em, $csvDir, 'mtb_authority', null, true);
-                $this->saveToC($em, $csvDir, 'dtb_member', null, true);
-
-                $this->commitTransaction($em);
-                $this->addSuccess('会員データ登録しました。', 'admin');
-            } catch (\Exception $e) {
-                $this->rollbackTransaction($em);
-                throw $e;
+            if ($this->flag_4) {
+                $this->saveToC($em, $csvDir, 'mtb_customer_order_status', null, true);
+                $this->saveToC($em, $csvDir, 'mtb_customer_status', null, true);
             }
+
+            $this->saveToC($em, $csvDir, 'dtb_customer');
+            if ($this->flag_4) {
+                $this->saveToC($em, $csvDir, 'dtb_customer_address');
+            } else if ($this->flag_3) {
+                // fixme 余計なデータが移行される
+                $this->saveToC($em, $csvDir, 'dtb_customer_address');
+            } else {
+                $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1);
+            }
+
+            $this->saveToC($em, $csvDir, 'mtb_authority', null, true);
+            //$this->saveToC($em, $csvDir, 'dtb_member', null, true);
+
+            //$this->commitTransaction($em);
+            $this->addSuccess('会員データ登録しました。', 'admin');
         } else {
             $this->addDanger('会員データが見つかりませんでした', 'admin');
         }
@@ -430,88 +423,81 @@ class ConfigController extends AbstractController
         }
 
         if (file_exists($csvDir . $product_db_name . '.csv') && filesize($csvDir . $product_db_name . '.csv') > 0) {
-            $this->beginTransaction($em);
             $platform = $em->getDatabasePlatform()->getName();
-            try {
 
-                // 2.11系の処理
-                if (file_exists($csvDir . 'dtb_class_combination.csv')) {
-                    $this->fix211classCombination($em, $platform, $csvDir);
-                }
+            // 2.11系の処理
+            if (file_exists($csvDir . 'dtb_class_combination.csv')) {
+                $this->fix211classCombination($em, $platform, $csvDir);
+            }
 
-                if ($this->flag_4) {
-                    $this->saveToC($em, $csvDir, 'mtb_product_status', null, true);
-                    $this->saveToC($em, $csvDir, 'mtb_sale_type', null, true);
-                    $this->saveToP($em, $csvDir, 'dtb_product');
-                    $this->saveToO($em, $csvDir, 'dtb_delivery_duration', null, true);
-                    $this->saveToP($em, $csvDir, 'dtb_product_class');
-                    $this->saveToP($em, $csvDir, 'dtb_class_category');
-                    $this->saveToP($em, $csvDir, 'dtb_class_name');
-                    $this->saveToP($em, $csvDir, 'dtb_product_category');
-                    $this->saveToP($em, $csvDir, 'dtb_product_stock');
-                    $this->saveToP($em, $csvDir, 'dtb_product_image');
-                    $this->saveToP($em, $csvDir, 'dtb_tag');
-                    $this->saveToP($em, $csvDir, 'dtb_product_tag');
-                    $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
-                } else if ($this->flag_3) {
-                    $this->saveToP($em, $csvDir, 'dtb_product');
-                    $this->saveToP($em, $csvDir, 'dtb_product_class');
-                    $this->saveToP($em, $csvDir, 'dtb_class_category');
-                    $this->saveToP($em, $csvDir, 'dtb_class_name');
-                    $this->saveToP($em, $csvDir, 'dtb_product_category');
-                    $this->saveToP($em, $csvDir, 'dtb_product_stock');
-                    $this->saveToP($em, $csvDir, 'dtb_product_image');
-                    $this->saveToP($em, $csvDir, 'dtb_product_tag');
-                    $this->saveToP($em, $csvDir, 'mtb_tag', 'dtb_tag');
-                    $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
-                } else {
-                    $this->saveToP($em, $csvDir, 'dtb_products', 'dtb_product');
-                    $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');
-                    $this->saveToP($em, $csvDir, 'dtb_classcategory', 'dtb_class_category');
-                    $this->saveToP($em, $csvDir, 'dtb_class', 'dtb_class_name');
-                    $this->saveToP($em, $csvDir, 'dtb_product_categories', 'dtb_product_category');
-                    $this->saveToP($em, $csvDir, 'dtb_product_status', 'dtb_product_tag');
-                    $this->saveToP($em, $csvDir, 'mtb_status', 'dtb_tag');
+            if ($this->flag_4) {
+                $this->saveToC($em, $csvDir, 'mtb_product_status', null, true);
+                $this->saveToC($em, $csvDir, 'mtb_sale_type', null, true);
+                $this->saveToP($em, $csvDir, 'dtb_product');
+                $this->saveToO($em, $csvDir, 'dtb_delivery_duration', null, true);
+                $this->saveToP($em, $csvDir, 'dtb_product_class');
+                $this->saveToP($em, $csvDir, 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_class_name');
+                $this->saveToP($em, $csvDir, 'dtb_product_category');
+                $this->saveToP($em, $csvDir, 'dtb_product_stock');
+                $this->saveToP($em, $csvDir, 'dtb_product_image');
+                $this->saveToP($em, $csvDir, 'dtb_tag');
+                $this->saveToP($em, $csvDir, 'dtb_product_tag');
+                $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
+            } else if ($this->flag_3) {
+                $this->saveToP($em, $csvDir, 'dtb_product');
+                $this->saveToP($em, $csvDir, 'dtb_product_class');
+                $this->saveToP($em, $csvDir, 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_class_name');
+                $this->saveToP($em, $csvDir, 'dtb_product_category');
+                $this->saveToP($em, $csvDir, 'dtb_product_stock');
+                $this->saveToP($em, $csvDir, 'dtb_product_image');
+                $this->saveToP($em, $csvDir, 'dtb_product_tag');
+                $this->saveToP($em, $csvDir, 'mtb_tag', 'dtb_tag');
+                $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
+            } else {
+                $this->saveToP($em, $csvDir, 'dtb_products', 'dtb_product');
+                $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');
+                $this->saveToP($em, $csvDir, 'dtb_classcategory', 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_class', 'dtb_class_name');
+                $this->saveToP($em, $csvDir, 'dtb_product_categories', 'dtb_product_category');
+                $this->saveToP($em, $csvDir, 'dtb_product_status', 'dtb_product_tag');
+                $this->saveToP($em, $csvDir, 'mtb_status', 'dtb_tag');
 
-                    $this->saveToP($em, $csvDir, 'dtb_customer_favorite_products', 'dtb_customer_favorite_product');
+                $this->saveToP($em, $csvDir, 'dtb_customer_favorite_products', 'dtb_customer_favorite_product');
 
-                    // 在庫
-                    $this->saveStock($em);
-                    // 画像
-                    $this->saveProductImage($em);
-                }
+                // 在庫
+                $this->saveStock($em);
+                // 画像
+                $this->saveProductImage($em);
+            }
 
-                $this->saveToP($em, $csvDir, 'dtb_category');
-                if (file_exists($csvDir . 'mtb_product_type.csv')) {
-                    $this->saveToP($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
-                }
+            $this->saveToP($em, $csvDir, 'dtb_category');
+            if (file_exists($csvDir . 'mtb_product_type.csv')) {
+                $this->saveToP($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
+            }
 
-                // 削除済み商品を4系のデータ構造に合わせる
-                $this->fixDeletedProduct($em);
+            // 削除済み商品を4系のデータ構造に合わせる
+            $this->fixDeletedProduct($em);
 
-                // リレーションエラーになるので
-                $em->exec('DELETE FROM dtb_cart');
-                $em->exec('DELETE FROM dtb_cart_item');
+            // リレーションエラーになるので
+            $em->exec('DELETE FROM dtb_cart');
+            $em->exec('DELETE FROM dtb_cart_item');
 
-                // 外部キー制約エラーになるデータを消す
-                $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
-                $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
-                $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
+            // 外部キー制約エラーになるデータを消す
+            $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
+            $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
+            $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
 
-                $em->exec('delete from dtb_product_tag where id in (
+            $em->exec('delete from dtb_product_tag where id in (
                 select id from (select t1.id from dtb_product_tag t1 left join dtb_tag t2 on t1.tag_id = t2.id where t2.id is null) as tmp
             );');
-                $em->exec('delete from dtb_product_tag where id in (
+            $em->exec('delete from dtb_product_tag where id in (
                 select id from (select t1.id from dtb_product_tag t1 left join dtb_product t2 on t1.product_id = t2.id where t2.id is null) as tmp
             );');
 
 
-                $this->commitTransaction($em);
-                $this->addSuccess('商品データを登録しました。', 'admin');
-            } catch (\Exception $e) {
-                $this->rollbackTransaction($em);
-                throw $e;
-            }
+            $this->addSuccess('商品データを登録しました。', 'admin');
         } else {
             $this->addDanger('商品データがが見つかりませんでした', 'admin');
         }
@@ -1183,74 +1169,67 @@ class ConfigController extends AbstractController
     {
         // 会員系
         if (file_exists($csvDir . 'dtb_order.csv') && filesize($csvDir . 'dtb_order.csv') > 0) {
-            $this->beginTransaction($em);
-            try {
-                // 2.4には存在しないデータ
-                if (!$this->flag_244) {
-                    $this->saveToO($em, $csvDir, 'mtb_device_type', null, true);
-                }
-                // todo mtb_order_status.display_order_count
+            // 2.4には存在しないデータ
+            if (!$this->flag_244) {
                 $this->saveToO($em, $csvDir, 'mtb_device_type', null, true);
-
-                if ($this->flag_4) {
-                    $this->saveToP($em, $csvDir, 'mtb_order_status', null, true);
-                    $this->saveToP($em, $csvDir, 'mtb_order_status_color', null, true);
-                    $this->saveToP($em, $csvDir, 'mtb_order_item_type', null, true);
-                    $this->saveToO($em, $csvDir, 'dtb_delivery_time');
-                    $this->saveToO($em, $csvDir, 'dtb_delivery');
-                    $this->saveToO($em, $csvDir, 'dtb_delivery_fee');
-                    $this->saveToO($em, $csvDir, 'dtb_mail_history');
-                } else if ($this->flag_3) {
-                    $this->saveToO($em, $csvDir, 'dtb_delivery_time');
-                    $this->saveToO($em, $csvDir, 'dtb_delivery');
-                    $this->saveToO($em, $csvDir, 'dtb_delivery_fee');
-                    $this->saveToO($em, $csvDir, 'dtb_mail_history');
-                } else {
-                    $this->saveToO($em, $csvDir, 'dtb_delivtime', 'dtb_delivery_time');
-                    $this->saveToO($em, $csvDir, 'dtb_deliv', 'dtb_delivery');
-                    $this->saveToO($em, $csvDir, 'dtb_delivfee', 'dtb_delivery_fee');
-                    $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
-                }
-
-                // fixme dtb_delivery_time のあとにやらなければダメ
-                $this->saveToO($em, $csvDir, 'dtb_order');
-                $this->saveToO($em, $csvDir, 'dtb_shipping');
-                $this->saveToO($em, $csvDir, 'dtb_payment');
-
-                if (!isset($this->product_class_id)) {
-                    sleep(5);
-                }
-                // todo 商品別税率設定
-                $this->saveToO($em, $csvDir, 'dtb_tax_rule', null, true); // 税率0にしている場合がある
-
-                // todo ダウンロード販売の処理
-                if ($this->flag_4 == false) {
-                    $this->saveToO($em, $csvDir, 'dtb_order_detail', 'dtb_order_item', true);
-                } else {
-                    // v4
-                    $this->saveToO($em, $csvDir, 'dtb_order_item');
-                    $this->saveToO($em, $csvDir, 'dtb_order_pdf');
-                    $this->saveToO($em, $csvDir, 'dtb_payment_option');
-                }
-
-                if (!empty($this->order_item)) {
-                    $this->saveOrderItem($em);
-                }
-
-                if ($this->flag_4 == false) {
-                    // 支払いは基本移行しない
-                    $em->exec('DELETE FROM dtb_payment_option');
-                }
-
-                // イレギュラー対応
-                $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
-                $this->commitTransaction($em);
-
-                $this->addSuccess('受注データを登録しました。', 'admin');
-            } catch (\Exception $e) {
-                $this->rollbackTransaction($em);
-                throw $e;
             }
+            // todo mtb_order_status.display_order_count
+            $this->saveToO($em, $csvDir, 'mtb_device_type', null, true);
+
+            if ($this->flag_4) {
+                $this->saveToP($em, $csvDir, 'mtb_order_status', null, true);
+                $this->saveToP($em, $csvDir, 'mtb_order_status_color', null, true);
+                $this->saveToP($em, $csvDir, 'mtb_order_item_type', null, true);
+                $this->saveToO($em, $csvDir, 'dtb_delivery_time');
+                $this->saveToO($em, $csvDir, 'dtb_delivery');
+                $this->saveToO($em, $csvDir, 'dtb_delivery_fee');
+                $this->saveToO($em, $csvDir, 'dtb_mail_history');
+            } else if ($this->flag_3) {
+                $this->saveToO($em, $csvDir, 'dtb_delivery_time');
+                $this->saveToO($em, $csvDir, 'dtb_delivery');
+                $this->saveToO($em, $csvDir, 'dtb_delivery_fee');
+                $this->saveToO($em, $csvDir, 'dtb_mail_history');
+            } else {
+                $this->saveToO($em, $csvDir, 'dtb_delivtime', 'dtb_delivery_time');
+                $this->saveToO($em, $csvDir, 'dtb_deliv', 'dtb_delivery');
+                $this->saveToO($em, $csvDir, 'dtb_delivfee', 'dtb_delivery_fee');
+                $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
+            }
+
+            // fixme dtb_delivery_time のあとにやらなければダメ
+            $this->saveToO($em, $csvDir, 'dtb_order');
+            $this->saveToO($em, $csvDir, 'dtb_shipping');
+            $this->saveToO($em, $csvDir, 'dtb_payment');
+
+            if (!isset($this->product_class_id)) {
+                sleep(5);
+            }
+            // todo 商品別税率設定
+            $this->saveToO($em, $csvDir, 'dtb_tax_rule', null, true); // 税率0にしている場合がある
+
+            // todo ダウンロード販売の処理
+            if ($this->flag_4 == false) {
+                $this->saveToO($em, $csvDir, 'dtb_order_detail', 'dtb_order_item', true);
+            } else {
+                // v4
+                $this->saveToO($em, $csvDir, 'dtb_order_item');
+                $this->saveToO($em, $csvDir, 'dtb_order_pdf');
+                $this->saveToO($em, $csvDir, 'dtb_payment_option');
+            }
+
+            if (!empty($this->order_item)) {
+                $this->saveOrderItem($em);
+            }
+
+            if ($this->flag_4 == false) {
+                // 支払いは基本移行しない
+                $em->exec('DELETE FROM dtb_payment_option');
+            }
+
+            // イレギュラー対応
+            $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
+
+            $this->addSuccess('受注データを登録しました。', 'admin');
         } else {
             $this->addDanger('受注データが見つかりませんでした', 'admin');
         }
@@ -1793,13 +1772,15 @@ class ConfigController extends AbstractController
 
     private function resetTable($em, $tableName)
     {
+        $em->exec('DELETE FROM ' . $tableName);
+        /*
         $platform = $em->getDatabasePlatform()->getName();
 
         if ($platform == 'mysql') {
             $em->exec('DELETE FROM ' . $tableName);
         } else {
             $em->exec('DELETE FROM ' . $tableName);
-        }
+        }*/
     }
 
 
@@ -1896,6 +1877,7 @@ class ConfigController extends AbstractController
 
     private function commitTransaction(Connection $em)
     {
+
         $platform = $em->getDatabasePlatform()->getName();
 
         if ($platform == 'mysql') {

@@ -15,12 +15,12 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ConfigControllerTest extends AbstractAdminWebTestCase
 {
-    public function setUp() : void
+    public function setUp(): void
     {
         parent::setUp();
     }
 
-    public function tearDown() : void
+    public function tearDown(): void
     {
         parent::tearDown();
     }
@@ -46,8 +46,8 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         $container = self::getContainer();
         $project_dir = $container->getParameter('kernel.project_dir');
 
-        $file = $project_dir.'/app/Plugin/DataMigration42/Tests/Fixtures/'.$v.'.tar.gz';
-        $testFile = $project_dir.'/app/Plugin/DataMigration42/Tests/Fixtures/test.tar.gz';
+        $file = $project_dir . '/app/Plugin/DataMigration42/Tests/Fixtures/' . $v . '.tar.gz';
+        $testFile = $project_dir . '/app/Plugin/DataMigration42/Tests/Fixtures/test.tar.gz';
 
         $fs = new Filesystem();
         $fs->copy($file, $testFile);
@@ -60,8 +60,7 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                     Constant::TOKEN_NAME => 'dummy',
                     'import_file' => $file,
                 ]
-            ]
-            ;
+            ];
 
         // 2.11系のmysqlにはcreate tableが使われているので、商品を除外してテストする
         if ($v == '2_11_5' && $this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'mysql') {
@@ -77,6 +76,8 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
 
         $customers = $this->entityManager->getRepository(Customer::class)->findAll();
         self::assertEquals($c, count($customers));
+        // $customersをphpunitの結果に出力する
+        var_dump($customers);
 
         if ($p > 0) {
             $products = $this->entityManager->getRepository(Product::class)->findAll();
@@ -86,5 +87,4 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         $orders = $this->entityManager->getRepository(Order::class)->findAll();
         self::assertEquals($o, count($orders));
     }
-
 }
