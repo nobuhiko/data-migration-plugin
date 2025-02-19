@@ -1864,7 +1864,7 @@ class ConfigController extends AbstractController
 
     private function beginTransaction(Connection $em)
     {
-        $em->beginTransaction();
+        //$em->beginTransaction();
         $platform = $em->getDatabasePlatform()->getName();
 
         if ($platform == 'mysql') {
@@ -1910,7 +1910,7 @@ class ConfigController extends AbstractController
             $this->setIdSeq($em, 'dtb_mail_history');
         }
 
-        $em->commit();
+        //$em->commit();
     }
 
     private function rollbackTransaction(Connection $em)
