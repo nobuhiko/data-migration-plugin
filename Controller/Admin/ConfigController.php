@@ -447,7 +447,7 @@ class ConfigController extends AbstractController
         }
 
         if (file_exists($csvDir . $product_db_name . '.csv') && filesize($csvDir . $product_db_name . '.csv') > 0) {
-            $platform = $this->begin();
+            $platform = $this->begin($em);
 
             // 2.11系の処理
             if (file_exists($csvDir . 'dtb_class_combination.csv')) {
@@ -1908,7 +1908,7 @@ class ConfigController extends AbstractController
         return $data;
     }
 
-    private function begin($em) {
+    private function begin($em)
     {
         $em->beginTransaction();
         $platform = $em->getDatabasePlatform()->getName();
