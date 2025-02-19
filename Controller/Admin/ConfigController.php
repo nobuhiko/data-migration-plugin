@@ -184,7 +184,7 @@ class ConfigController extends AbstractController
 
     private function saveCustomerAndOrder($em, $csvDir)
     {
-        $this->beginTransaction($em);
+        $platform = $this->begin($em);
 
         // 会員
         $this->saveToC($em, $csvDir, 'dtb_customer');
@@ -243,16 +243,8 @@ class ConfigController extends AbstractController
     {
         // 会員系
         if (file_exists($csvDir . 'dtb_customer.csv') && filesize($csvDir . 'dtb_customer.csv') > 0) {
-            $em->beginTransaction();
 
-            $platform = $em->getDatabasePlatform()->getName();
-
-            if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-                $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-            } else {
-                $em->exec('SET session_replication_role = replica;'); // need super user
-            }
+            $platform = $this->begin($em);
 
             $this->saveToC($em, $csvDir, 'mtb_job', null, true);
             $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
@@ -455,16 +447,7 @@ class ConfigController extends AbstractController
         }
 
         if (file_exists($csvDir . $product_db_name . '.csv') && filesize($csvDir . $product_db_name . '.csv') > 0) {
-            $em->beginTransaction();
-
-            $platform = $em->getDatabasePlatform()->getName();
-
-            if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-                $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-            } else {
-                $em->exec('SET session_replication_role = replica;');
-            }
+            $platform = $this->begin();
 
             // 2.11系の処理
             if (file_exists($csvDir . 'dtb_class_combination.csv')) {
@@ -1227,16 +1210,7 @@ class ConfigController extends AbstractController
     {
         // 会員系
         if (file_exists($csvDir . 'dtb_order.csv') && filesize($csvDir . 'dtb_order.csv') > 0) {
-            $em->beginTransaction();
-
-            $platform = $em->getDatabasePlatform()->getName();
-
-            if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-                $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-            } else {
-                $em->exec('SET session_replication_role = replica;'); // need super user
-            }
+            $platform = $this->begin($em);
 
             // 2.4には存在しないデータ
             if (!$this->flag_244) {
@@ -1934,16 +1908,18 @@ class ConfigController extends AbstractController
         return $data;
     }
 
-    private function beginTransaction($em)
+    private function begin($em) {
     {
         $em->beginTransaction();
         $platform = $em->getDatabasePlatform()->getName();
 
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-            $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'");
+            $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } else {
-            $em->exec('SET session_replication_role = replica;');
+            $em->exec('SET session_replication_role = replica;'); // need super user
         }
+
+        return $platform;
     }
 }
