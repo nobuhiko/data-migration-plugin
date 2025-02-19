@@ -1915,6 +1915,6 @@ class ConfigController extends AbstractController
 
     private function rollbackTransaction(Connection $em)
     {
-        $em->rollback();
+        //$em->rollback();
     }
 }
