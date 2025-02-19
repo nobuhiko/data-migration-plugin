@@ -1860,7 +1860,7 @@ class ConfigController extends AbstractController
         if ($platform == 'mysql') {
             $em->exec('DELETE FROM ' . $tableName);
         } else {
-            $em->exec('DELETE FROM ' . $tableName);
+            $em->exec('TRUNCATE ' . $tableName . ' CASCADE;');
         }
     }
 
