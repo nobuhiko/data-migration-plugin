@@ -159,6 +159,15 @@ class ConfigController extends AbstractController
                 }
             }
 
+
+            // postgresqlの場合は、シーケンスをリセットする
+            if ($em->getDatabasePlatform()->getName() == 'postgresql') {
+                $tables = $em->getSchemaManager()->listTables();
+                foreach ($tables as $table) {
+                    $this->disableTrigger($em, $table->getName());
+                }
+            }
+
             // 会員・受注のみ移行
             if ($form['customer_order_only']->getData()) {
                 $this->saveCustomerAndOrder($em, $csvDir);
