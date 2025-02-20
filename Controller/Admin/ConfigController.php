@@ -125,6 +125,9 @@ class ConfigController extends AbstractController
             $fs = new Filesystem();
             $fs->remove($tmpDir);
 
+            // .envのECCUBE_AUTH_MAGICを書き換える
+            $this->dataMigrationService->updateEnv($form['auth_magic']->getData());
+
             return $this->redirectToRoute('data_migration42_admin_config');
         }
 

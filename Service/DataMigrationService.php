@@ -5,9 +5,19 @@ namespace Plugin\DataMigration42\Service;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Logging\Middleware;
 use wapmorgan\UnifiedArchive\UnifiedArchive;
+use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 class DataMigrationService
 {
+    private $migrationVersion = '2';
+
+    private $params;
+
+    public function __construct(ParameterBagInterface $params)
+    {
+        $this->params = $params;
+    }
+
     public function disableLogging(Connection $em)
     {
         $configuration = $em->getConfiguration();
@@ -19,8 +29,6 @@ class DataMigrationService
         }
         $configuration->setMiddlewares($middlewares);
     }
-
-    public $migrationVersion = '2';
 
     public function setMigrationVersion($em, $tmpDir, $tmpFile)
     {
@@ -70,6 +78,23 @@ class DataMigrationService
         return $this->migrationVersion === $version;
     }
 
+    public function updateEnv($newMagicValue)
+    {
+        $projectDir = $this->params->get('kernel.project_dir');
+        $envFile = $projectDir . '/.env.local';
+
+        if (!file_exists($envFile)) {
+            touch($envFile);
+        }
+
+        $env = file_get_contents($envFile);
+        if (strpos($env, 'ECCUBE_AUTH_MAGIC=') !== false) {
+            $env = preg_replace('/ECCUBE_AUTH_MAGIC=.*/', 'ECCUBE_AUTH_MAGIC=' . $newMagicValue, $env);
+        } else {
+            $env .= "\nECCUBE_AUTH_MAGIC=" . $newMagicValue;
+        }
+        file_put_contents($envFile, $env);
+    }
 
     public function resetTable(Connection $em, $tableName)
     {

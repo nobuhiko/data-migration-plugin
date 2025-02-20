@@ -59,6 +59,7 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                 'config' => [
                     Constant::TOKEN_NAME => 'dummy',
                     'import_file' => $file,
+                    'auth_magic' => 'dummy',
                 ]
             ];
 
@@ -84,5 +85,10 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
 
         $orders = $this->entityManager->getRepository(Order::class)->findAll();
         self::assertEquals($o, count($orders));
+
+        // ECCUBE_AUTH_MAGICの値を取得してアサート
+        $eccubeConfig = $container->get('Eccube\Common\EccubeConfig');
+        $authMagic = $eccubeConfig->get('eccube_auth_magic');
+        self::assertEquals('dummy', $authMagic);
     }
 }
