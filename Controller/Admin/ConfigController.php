@@ -46,6 +46,8 @@ class ConfigController extends AbstractController
     protected $dtb_class_combination = [];
     /** @var array */
     protected $shipping_order = [];
+    /** @var array */
+    protected $customer_point = [];
 
     /**
      * constructor.
@@ -99,6 +101,7 @@ class ConfigController extends AbstractController
                 $this->fix24Shipping($em, $csvDir);
                 $this->fix24ProductsClass($em, $csvDir);
             } elseif ($this->dataMigrationService->isVersion('3')) {
+                $this->fixPlgPoint($em, $csvDir); // ポイントプラグイン
             } elseif ($this->dataMigrationService->isVersion('4.0/4.1')) {
             }
 
@@ -346,7 +349,12 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'secret_key') { // 実験
                             $value[$column] = uniqid('secret_key_' . mt_rand() . '.', true);
                         } elseif ($column == 'point') {
-                            $value[$column] = empty($data[$column]) ? 0 : (int) $data[$column];
+
+                            if ($this->dataMigrationService->isVersion('3') == true && isset($this->customer_point[$data['customer_id']])) {
+                                $value[$column] = $this->customer_point[$data['customer_id']]['plg_point_current'];
+                            } else {
+                                $value[$column] = empty($data[$column]) ? 0 : (int) $data[$column];
+                            }
                         } elseif ($column == 'salt') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;  // @see https://github.com/EC-CUBE/data-migration-plugin/issues/38
                         } elseif ($column == 'creator_id') {
@@ -1656,6 +1664,34 @@ class ConfigController extends AbstractController
             fclose($fpcsv);
         }
     }
+
+
+    private function fixPlgPoint($em, $tmpDir)
+    {
+        if (!file_exists($tmpDir . 'plg_point_customer.csv')) {
+            return;
+        }
+
+        if (($handle = fopen($tmpDir . 'plg_point_customer.csv', 'r')) !== false) {
+            $key = fgetcsv($handle);
+            // phpmyadminのcsvに余計なスペースが入っているので取り除く
+            $key = array_filter(array_map('trim', $key));
+            $keySize = count($key);
+
+            $add_value = [];
+            while (($row = fgetcsv($handle)) !== false) {
+                // 1行目をkeyとした配列を作る
+                $value = $this->dataMigrationService->convertNULL(array_combine($key, $row));
+                $add_value[$value["customer_id"]] = $value;
+            }
+            fclose($handle);
+
+            // 顧客IDをキーにして、dtb_customerにポイントを追加する
+            $this->customer_point = $add_value;
+        }
+    }
+
+
     // タイムゾーンの変換
     private function convertTz($datetime)
     {
