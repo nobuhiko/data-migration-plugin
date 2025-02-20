@@ -15,12 +15,12 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ConfigControllerTest extends AbstractAdminWebTestCase
 {
-    public function setUp() : void
+    public function setUp(): void
     {
         parent::setUp();
     }
 
-    public function tearDown() : void
+    public function tearDown(): void
     {
         parent::tearDown();
     }
@@ -46,8 +46,8 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         $container = self::getContainer();
         $project_dir = $container->getParameter('kernel.project_dir');
 
-        $file = $project_dir.'/app/Plugin/DataMigration42/Tests/Fixtures/'.$v.'.tar.gz';
-        $testFile = $project_dir.'/app/Plugin/DataMigration42/Tests/Fixtures/test.tar.gz';
+        $file = $project_dir . '/app/Plugin/DataMigration42/Tests/Fixtures/' . $v . '.tar.gz';
+        $testFile = $project_dir . '/app/Plugin/DataMigration42/Tests/Fixtures/test.tar.gz';
 
         $fs = new Filesystem();
         $fs->copy($file, $testFile);
@@ -59,9 +59,9 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                 'config' => [
                     Constant::TOKEN_NAME => 'dummy',
                     'import_file' => $file,
+                    'auth_magic' => 'dummy',
                 ]
-            ]
-            ;
+            ];
 
         // 2.11系のmysqlにはcreate tableが使われているので、商品を除外してテストする
         if ($v == '2_11_5' && $this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'mysql') {
@@ -85,6 +85,10 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
 
         $orders = $this->entityManager->getRepository(Order::class)->findAll();
         self::assertEquals($o, count($orders));
-    }
 
+        // ECCUBE_AUTH_MAGICの値を取得してアサート
+        $eccubeConfig = $container->get('Eccube\Common\EccubeConfig');
+        $authMagic = $eccubeConfig->get('eccube_auth_magic');
+        self::assertEquals('dummy', $authMagic);
+    }
 }

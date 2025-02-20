@@ -61,7 +61,7 @@ file that was distributed with this source code.
                         <div class="alert alert-info" role="alert">
                             <span class="glyphicon glyphicon-exclamation-sign" aria-hidden="true"></span>
                             <span class="sr-only">Error:</span>
-                            <strong>2系のバックアップファイルを使用して、データを復元します。</strong>
+                            <strong>2系, 3系のバックアップファイルを使用して、データを復元します。</strong>
                             <ul>
                                 <li>・会員</li>
                                 <li>・管理者情報</li>
@@ -71,12 +71,13 @@ file that was distributed with this source code.
                                 <li>・支払方法</li>
                                 <li>・配送方法</li>
                                 <li>全て上書きします。実施前にバックアップをお取りください。</li>
-                                <li>登録後、ECCUBE_AUTH_MAGICを旧サイトのAUTH_MAGICで上書きする必要があります、先にご用意ください。</li>
+                                <li>管理者、会員のログイン情報を移行するためにECCUBE_AUTH_MAGICを旧サイトのAUTH_MAGICで上書きする必要があります、下記を参照にご用意ください。</li>
                             </ul>
                             <dl class="dl-horizontal">
-                                <dt>ECCUBE_AUTH_MAGICの場所</dt><dd>.env</dd>
-                                <dt>AUTH_MAGICの場所(2.4.4)</dt><dd>data/cache/mtb_constants.php</dd>
-                                <dt>AUTH_MAGICの場所(2.11以降)</dt><dd>data/config/config.php</dd>
+                                <dt>[2.4.4] AUTH_MAGICの場所</dt><dd>data/cache/mtb_constants.php</dd>
+                                <dt>[2.11以降の2系]AUTH_MAGICの場所</dt><dd>data/config/config.php</dd>
+                                <dt>[3系]auth_magicの場所</dt><dd>app/config/eccube/config.yml</dd>
+                                <dt>[4系]ECCUBE_AUTH_MAGICの場所</dt><dd>.env</dd>
                             </dl>
                         </div>
                         <div id="ex-csv_product-upload" class="card-body">
@@ -87,6 +88,18 @@ file that was distributed with this source code.
                                         {{ form_errors(form.import_file) }}
                                         <br/>
                                         <button class="btn btn-ec-conversion" type="submit" id="upload-button">Upload</button> (最大 {{ max_upload_size }})
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-2">
+                                    <span>AUTH_MAGIC</span>
+                                    <span class="badge bg-primary ms-1">
+                                        {{ 'admin.common.required'|trans }}
+                                    </span>
+                                </div>
+                                <div class="col">
+                                    {{ form_widget(form.auth_magic) }}
+                                    {{ form_errors(form.auth_magic ) }}
                                 </div>
                             </div>
                             <div class="row">
