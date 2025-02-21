@@ -102,7 +102,6 @@ class ConfigController extends AbstractController
                 $this->fix24ProductsClass($em, $csvDir);
             } elseif ($this->dataMigrationService->isVersion('3')) {
                 $this->fixPlgPoint($em, $csvDir); // ポイントプラグイン
-            } elseif ($this->dataMigrationService->isVersion('4.0/4.1')) {
             }
 
             // 2.13以外全部
@@ -111,14 +110,26 @@ class ConfigController extends AbstractController
                 $this->fix24baseinfo($em, $csvDir);
             }
 
-            // 会員・受注のみ移行
-            if ($form['customer_order_only']->getData()) {
-                $this->saveCustomerAndOrder($em, $csvDir);
-                // 全データ移行
+            if ($this->dataMigrationService->isVersion('4.0/4.1')) {
+
+                // $csvDir 内のファイルをすべて読み込む
+                $files = scandir($csvDir);
+                foreach ($files as $file) {
+                    // csvファイルのみ処理
+                    if (is_file($csvDir . $file) && pathinfo($file, PATHINFO_EXTENSION) === 'csv') {
+                        $this->fix4x($em, $csvDir, $file);
+                    }
+                }
             } else {
-                $this->saveCustomer($em, $csvDir);
-                $this->saveProduct($em, $csvDir);
-                $this->saveOrder($em, $csvDir);
+                if ($form['customer_order_only']->getData()) {
+                    // 会員・受注のみ移行
+                    $this->saveCustomerAndOrder($em, $csvDir);
+                } else {
+                    // 全データ移行
+                    $this->saveCustomer($em, $csvDir);
+                    $this->saveProduct($em, $csvDir);
+                    $this->saveOrder($em, $csvDir);
+                }
             }
 
             // 削除
@@ -1713,5 +1724,95 @@ class ConfigController extends AbstractController
         }
 
         return array_values($this->tax_rule)[0];
+    }
+
+    private function fix4x($em, $tmpDir, $csvName)
+    {
+        if ($csvName == "dtb_member.csv") {
+            // 変更するとログアウトしちゃうので
+            return;
+        }
+
+        // csvNameからテーブル名を取得
+
+        if (filesize($tmpDir . $csvName) == 0) {
+            // 無視する
+            return;
+        }
+
+        $tableName = str_replace('.csv', '', $csvName);
+        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+
+        if ($columns == false) {
+            return;
+        }
+        $listTableColumns = [];
+        foreach ($columns as $column) {
+            $listTableColumns[] = $column->getName();
+        }
+
+        $platform = $this->dataMigrationService->begin($em);
+        $this->dataMigrationService->resetTable($em, $tableName);
+
+        $builder = new BulkInsertQuery($em, $tableName);
+        $builder->setColumns($listTableColumns);
+
+        $batchSize = 20;
+
+        if (($handle = fopen($tmpDir . $csvName, 'r')) !== false) {
+            // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
+            $key = fgetcsv($handle);
+            // phpmyadminのcsvに余計なスペースが入っているので取り除く
+            $key = array_filter(array_map('trim', $key));
+
+            $i = 1;
+            while (($row = fgetcsv($handle)) !== false) {
+
+                // 1行目をkeyとした配列を作る
+                $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
+                // Schemaにあわせた配列を作成する
+                $value = [];
+                foreach ($columns as $column) {
+
+                    $columnName = $column->getName();
+                    if ($column->getNotNull()) {
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : 0;
+                    } else {
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
+                    }
+                }
+
+                $builder->setValues($value);
+
+                if (($i % $batchSize) === 0) {
+                    try {
+                        $builder->execute();
+                        $this->addSuccess($tableName, 'admin');
+                    } catch (\Exception $e) {
+                        $this->addDanger($e->getMessage(), 'admin');
+                        $em->rollback();
+                        return;
+                    }
+                }
+
+                $i++;
+            }
+
+            if (count($builder->getValues()) > 0) {
+                try {
+                    $builder->execute();
+                    $this->addSuccess($tableName, 'admin');
+                } catch (\Exception $e) {
+                    $this->addDanger($e->getMessage(), 'admin');
+                    $em->rollback();
+                    return;
+                }
+            }
+            $em->commit();
+
+            fclose($handle);
+
+            return $i; // indexを返す
+        }
     }
 }
