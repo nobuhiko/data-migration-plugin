@@ -81,7 +81,7 @@ class DataMigrationService
     public function updateEnv($newMagicValue)
     {
         $projectDir = $this->params->get('kernel.project_dir');
-        $envFile = $projectDir . '/.env.local';
+        $envFile = $projectDir . '/.env';
 
         if (!file_exists($envFile)) {
             touch($envFile);
