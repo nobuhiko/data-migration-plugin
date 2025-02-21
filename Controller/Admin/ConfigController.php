@@ -1728,6 +1728,11 @@ class ConfigController extends AbstractController
 
     private function fix4x($em, $tmpDir, $csvName)
     {
+        if ($csvName == "dtb_member.csv") {
+            // 変更するとログアウトしちゃうので
+            return;
+        }
+
         // csvNameからテーブル名を取得
 
         if (filesize($tmpDir . $csvName) == 0) {
@@ -1767,8 +1772,14 @@ class ConfigController extends AbstractController
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
                 // Schemaにあわせた配列を作成する
                 $value = [];
-                foreach ($listTableColumns as $column) {
-                    $value[$column] = $data[$column] ?? 0;
+                foreach ($columns as $column) {
+
+                    $columnName = $column->getName();
+                    if ($column->getNotNull()) {
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : 0;
+                    } else {
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
+                    }
                 }
 
                 $builder->setValues($value);
