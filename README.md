@@ -1,8 +1,6 @@
 # データ移行プラグイン for EC-CUBE4
 
-EC-CUBE2 系・3 系のバックアップデータを利用して、4 系へのデータ移行を行うプラグイン
-
-https://www.ec-cube.net/products/detail.php?product_id=1804
+EC-CUBE 2~4.1 のバックアップデータを利用して、4.3 系へのデータ移行を行うプラグイン
 
 ## :sunny: 移行出来るデータ
 
@@ -70,7 +68,7 @@ https://www.ec-cube.net/products/detail.php?product_id=1804
 
 ### 決済モジュール
 
-## :exclamation: 注意点
+## :exclamation: 注意点 1
 
 - アップロードファイルの最大容量は PHP の設定に依存します。(memory_limit, post_max_size, upload_max_filesize)
 - PostgreSQL の場合は、super user 権限が必要になります
@@ -86,6 +84,10 @@ https://www.ec-cube.net/products/detail.php?product_id=1804
 - ポイントは、受注時点の 1pt あたりの金額が判別できないため、1pt ＝ 1 円として計算しています。
 - パラメータ設定で`POINT_VALUE`を変更している場合、正確な金額を移行することができません。
 - 存在しない受注ステータスを利用している受注は、受注ステータスが null の状態で移行されます。受注検索画面では表示されないため、移行後に適切な受注ステータスを紐付ける必要があります。
+
+## :exclamation: 注意点 2
+
+4.0,4.1 から 4.3 への移行は**すべてのデータ**を移行します。
 
 ## License
 
