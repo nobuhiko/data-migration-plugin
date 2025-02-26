@@ -63,7 +63,7 @@ class ConfigController extends AbstractController
     }
 
     /**
-     * @Route("/%eccube_admin_route%/data_migration42/config", name="data_migration42_admin_config")
+     * @Route("/%eccube_admin_route%/datamigration43/config", name="data_migration43_admin_config")
      * @Template("@DataMigration43/admin/config.twig")
      */
     public function index(Request $request, Connection $em)
