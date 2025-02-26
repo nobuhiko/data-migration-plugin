@@ -1,5 +1,5 @@
 {
-    "name": "ec-cube/datamigration42",
+    "name": "ec-cube/datamigration43",
     "version": "4.3.0",
     "description": "データ移行プラグイン",
     "type": "eccube-plugin",
@@ -11,6 +11,6 @@
         "nobuhiko/bulk-insert-query": "*"
     },
     "extra": {
-        "code": "DataMigration42"
+        "code": "DataMigration43"
     }
 }

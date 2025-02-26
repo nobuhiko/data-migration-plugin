@@ -1,6 +1,6 @@
 <?php
 
-namespace Plugin\DataMigration42\Form\Type\Admin;
+namespace Plugin\DataMigration43\Form\Type\Admin;
 
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;

@@ -1,7 +1,7 @@
 <?php
 
 
-namespace Plugin\DataMigration42\Tests\Web\Admin;
+namespace Plugin\DataMigration43\Tests\Web\Admin;
 
 
 use Eccube\Common\Constant;
@@ -46,8 +46,8 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         $container = self::getContainer();
         $project_dir = $container->getParameter('kernel.project_dir');
 
-        $file = $project_dir . '/app/Plugin/DataMigration42/Tests/Fixtures/' . $v . '.tar.gz';
-        $testFile = $project_dir . '/app/Plugin/DataMigration42/Tests/Fixtures/test.tar.gz';
+        $file = $project_dir . '/app/Plugin/DataMigration43/Tests/Fixtures/' . $v . '.tar.gz';
+        $testFile = $project_dir . '/app/Plugin/DataMigration43/Tests/Fixtures/test.tar.gz';
 
         $fs = new Filesystem();
         $fs->copy($file, $testFile);

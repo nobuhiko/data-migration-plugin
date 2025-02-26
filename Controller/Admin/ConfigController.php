@@ -1,14 +1,14 @@
 <?php
 
-namespace Plugin\DataMigration42\Controller\Admin;
+namespace Plugin\DataMigration43\Controller\Admin;
 
 use Doctrine\DBAL\Connection;
 use Eccube\Controller\AbstractController;
 use Eccube\Service\PluginService;
 use Eccube\Util\StringUtil;
 use nobuhiko\BulkInsertQuery\BulkInsertQuery;
-use Plugin\DataMigration42\Form\Type\Admin\ConfigType;
-use Plugin\DataMigration42\Service\DataMigrationService;
+use Plugin\DataMigration43\Form\Type\Admin\ConfigType;
+use Plugin\DataMigration43\Service\DataMigrationService;
 use Symfony\Component\Routing\Annotation\Route;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Template;
 use Symfony\Component\Filesystem\Filesystem;
@@ -64,7 +64,7 @@ class ConfigController extends AbstractController
 
     /**
      * @Route("/%eccube_admin_route%/data_migration42/config", name="data_migration42_admin_config")
-     * @Template("@DataMigration42/admin/config.twig")
+     * @Template("@DataMigration43/admin/config.twig")
      */
     public function index(Request $request, Connection $em)
     {

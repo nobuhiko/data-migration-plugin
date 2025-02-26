@@ -1,6 +1,6 @@
 <?php
 
-namespace Plugin\DataMigration42\Service;
+namespace Plugin\DataMigration43\Service;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Logging\Middleware;
