@@ -10,7 +10,7 @@ jobs:
         eccube_version: ["4.2", "4.3"]
         php: ["7.4", "8.0", "8.1", "8.2", "8.3"]
         db: ["mysql", "mysql8", "pgsql"]
-        plugin_code: ["DataMigration42"]
+        plugin_code: ["DataMigration43"]
         include:
           - db: mysql
             database_url: mysql://root:password@127.0.0.1:3306/eccube_db
@@ -136,7 +136,7 @@ jobs:
         working-directory: "ec-cube"
         run: |
           bin/console doctrine:query:sql "update dtb_base_info set authentication_key='dummy'"
-          bin/console eccube:composer:require ec-cube/datamigration42
+          bin/console eccube:composer:require ec-cube/datamigration43
           bin/console cache:clear --no-warmup
           bin/console eccube:plugin:enable --code=${PLUGIN_CODE}
       - name: Run PHPUnit Plugin
