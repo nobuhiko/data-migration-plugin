@@ -2,6 +2,10 @@
 
 EC-CUBE 2~4.1 のバックアップデータを利用して、4.3 系へのデータ移行を行うプラグイン
 
+- https://www.ec-cube.net/products/detail.php?product_id=2091
+- https://www.ec-cube.net/products/detail.php?product_id=2479
+- https://www.ec-cube.net/products/detail.php?product_id=2931
+
 ## :sunny: 移行出来るデータ
 
 ### 会員データ
