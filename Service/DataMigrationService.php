@@ -284,4 +284,327 @@ class DataMigrationService
             fclose($handle);
         }
     }
+
+    /**
+     * 指定したプラグインコードがインストール済みかどうかを返す
+     *
+     * @param \Doctrine\DBAL\Connection|\Doctrine\ORM\EntityManagerInterface $em
+     * @param string $code
+     * @return bool
+     */
+    public function isPluginInstalled($em, $code)
+    {
+        // DBAL Connection から直接SQLで判定
+        $sql = "SELECT COUNT(*) FROM dtb_plugin WHERE code = ?";
+        $count = $em->fetchOne($sql, [$code]);
+        return $count > 0;
+    }
+
+    /**
+     * plg_customerplusの移行処理
+     * @param $em
+     * @param $csvDir
+     * @param $controller (ConfigController) メッセージ出力用
+     */
+    public function migrateCustomerPlus($em, $csvDir, $controller)
+    {
+        $platform = $this->begin($em);
+
+        // plg_customerplus_dtb_customer_itemを先にインポートしてからplg_customerplus_dtb_customer_data/data_detailを作成
+        $importOrder = [
+            'plg_customerplus_dtb_customer_item',
+            'plg_customerplus_dtb_customer_item_option',
+            //'plg_customerplus_dtb_customer', 別に登録する
+            'plg_customerplus_dtb_customer_data',
+            'plg_customerplus_dtb_customer_data_detail',
+            'plg_customerplus_dtb_order',
+            'plg_customerplus_dtb_shipping',
+            'plg_customerplus_dtb_customer_address', // 移行前のテーブル: plg_customerplus_dtb_other_deliv
+        ];
+
+        // 全テーブルのデータを削除
+        foreach ($importOrder as $tableName) {
+            if ($em->getSchemaManager()->tablesExist([$tableName])) {
+                $this->resetTable($em, $tableName);
+            }
+        }
+
+        // plg_customerplus_dtb_customerからplg_customerplus_dtb_customer_data.csvとplg_customerplus_dtb_customer_data_detail.csvを作成
+        $customerCsv = $csvDir . 'plg_customerplus_dtb_customer.csv';
+        $dataCsv = $csvDir . 'plg_customerplus_dtb_customer_data.csv';
+        $detailCsv = $csvDir . 'plg_customerplus_dtb_customer_data_detail.csv';
+
+        // 既存データをクリア
+        file_put_contents($dataCsv, '');
+        file_put_contents($detailCsv, '');
+
+        // ヘッダ
+        $dataHeader = ['id', 'customer_item_id', 'create_date', 'discriminator_type'];
+        $detailHeader = ['id', 'customer_data_id', 'value', 'date_value', 'num_value', 'discriminator_type'];
+        $dataFp = fopen($dataCsv, 'w');
+        $detailFp = fopen($detailCsv, 'w');
+        fputcsv($dataFp, $dataHeader);
+        fputcsv($detailFp, $detailHeader);
+
+        // customer_data_idをcustomerごとに採番
+        $dataId = 1;
+        $detailId = 1;
+        $customerRowsForUpdate = [];
+        // value -> customer_data_id のマッピングを保存
+        $valueToDataIdMap = [];
+
+        if (file_exists($customerCsv) && filesize($customerCsv) > 0) {
+            if (($handle = fopen($customerCsv, 'r')) !== false) {
+                $key = fgetcsv($handle);
+                $key = array_filter(array_map('trim', $key));
+                while (($row = fgetcsv($handle)) !== false) {
+                    $dataRow = $this->convertNULL(array_combine($key, $row));
+                    // valueカラムが配列やJSONの場合を想定
+                    if (isset($dataRow['value']) && $dataRow['value'] !== null && $dataRow['value'] !== '') {
+                        $values = @json_decode($dataRow['value'], true);
+                        if (!is_array($values)) {
+                            if (strpos($dataRow['value'], ',') !== false) {
+                                $values = explode(',', $dataRow['value']);
+                            } else {
+                                $values = [$dataRow['value']];
+                            }
+                        }
+                    } else {
+                        $values = [null];
+                    }
+                    $customer_item_id = isset($dataRow['customer_item_id']) ? $dataRow['customer_item_id'] : null;
+                    $customer_id = isset($dataRow['customer_id']) ? $dataRow['customer_id'] : null;
+                    $create_date = isset($dataRow['create_date']) ? $dataRow['create_date'] : date('Y-m-d H:i:s');
+                    // customer_data_idを採番
+                    $customer_data_id = $dataId;
+                    // valueとcustomer_data_idの関連付けを保存
+                    $originalValue = isset($dataRow['value']) ? $dataRow['value'] : null;
+                    if ($originalValue !== null) {
+                        $valueToDataIdMap[$originalValue] = $customer_data_id;
+                    }
+                    // customerRowsForUpdateにcustomer_id, customer_item_id, customer_data_idを保存
+                    $customerRowsForUpdate[$customer_id][] = $customer_data_id;
+                    $dataCsvRow = [
+                        $customer_data_id,
+                        $customer_item_id,
+                        $create_date,
+                        'customerdata'
+                    ];
+                    fputcsv($dataFp, $dataCsvRow);
+                    foreach ($values as $v) {
+                        $detailCsvRow = [
+                            $detailId,
+                            $customer_data_id,
+                            $v,
+                            null,
+                            null,
+                            'customerdatadetail'
+                        ];
+                        fputcsv($detailFp, $detailCsvRow);
+                        $detailId++;
+                    }
+                    $dataId++;
+                }
+                fclose($handle);
+            }
+        }
+        fclose($dataFp);
+        fclose($detailFp);
+
+        // plg_customerplus_dtb_customer_option → plg_customerplus_dtb_customer_item_option へのマッピング
+        $optionCsv = $csvDir . 'plg_customerplus_dtb_customer_option.csv';
+        $itemOptionCsv = $csvDir . 'plg_customerplus_dtb_customer_item_option.csv';
+        if (file_exists($optionCsv) && !file_exists($itemOptionCsv)) {
+            rename($optionCsv, $itemOptionCsv);
+        }
+
+        // plg_customerplus_dtb_other_deliv → plg_customerplus_dtb_customer_address へのマッピング
+        $otherDelivCsv = $csvDir . 'plg_customerplus_dtb_other_deliv.csv';
+        $customerAddressCsv = $csvDir . 'plg_customerplus_dtb_customer_address.csv';
+        if (file_exists($otherDelivCsv) && !file_exists($customerAddressCsv)) {
+            rename($otherDelivCsv, $customerAddressCsv);
+        }
+
+        // plg_customerplus_dtb_customer
+        $this->resetTable($em, "plg_customerplus_dtb_customer");
+        $columns = $em->getSchemaManager()->listTableColumns("plg_customerplus_dtb_customer");
+        $listTableColumns = [];
+        foreach ($columns as $column) {
+            $listTableColumns[] = $column->getName();
+        }
+
+        $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, "plg_customerplus_dtb_customer");
+        $builder->setColumns($listTableColumns);
+        $plg_customerplus_dtb_customer_i = 1;
+        foreach ($customerRowsForUpdate as $customer_id => $customerRows) {
+            foreach ($customerRows as $customer_data_id) {
+                $row = [
+                    'id' => $plg_customerplus_dtb_customer_i,
+                    'customer_id' => $customer_id,
+                    'customer_data_id' => $customer_data_id,
+                    'customer_item_id' => 1,
+                    'create_date' => date('Y-m-d H:i:s'),
+                    'discriminator_type' => 'customercustom'
+                ];
+                $builder->setValues($row);
+                $builder->execute(); // 1件ずつ即時実行
+                $plg_customerplus_dtb_customer_i++;
+            }
+
+            $plg_customerplus_dtb_customer_i++;
+        }
+        // // plg_customerplus_dtb_customer
+
+        // テーブルごとにインポート
+        foreach ($importOrder as $tableName) {
+            $csvFile = $csvDir . $tableName . '.csv';
+            if (!file_exists($csvFile) || filesize($csvFile) === 0) {
+                $controller->addWarning($tableName . '.csv が見つからないか空です。', 'admin');
+                continue;
+            }
+
+            $columns = $em->getSchemaManager()->listTableColumns($tableName);
+            $listTableColumns = [];
+            foreach ($columns as $column) {
+                $listTableColumns[] = $column->getName();
+            }
+
+            $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
+            $builder->setColumns($listTableColumns);
+
+            if (($handle = fopen($csvFile, 'r')) !== false) {
+                $key = fgetcsv($handle);
+                $key = array_filter(array_map('trim', $key));
+                $i = 1;
+                $batchSize = 20;
+
+                // --- 通常処理 ---
+                while (($row = fgetcsv($handle)) !== false) {
+                    $data = $this->convertNULL(array_combine($key, $row));
+                    $value = [];
+                    switch ($tableName) {
+                        case 'plg_customerplus_dtb_customer':
+                            // なにもしない
+
+                            break;
+                        case 'plg_customerplus_dtb_customer_item':
+                            foreach ($listTableColumns as $column) {
+                                if ($column === 'id' && isset($data['customer_item_id'])) {
+                                    $value[$column] = $data['customer_item_id'];
+                                } elseif ($column === 'name' && isset($data['title'])) {
+                                    $value[$column] = $data['title'];
+                                } elseif ($column === 'input_type' && isset($data['input_type'])) {
+                                    $value[$column] = $data['input_type'];
+                                } elseif ($column === 'is_required' && isset($data['is_require'])) {
+                                    $value[$column] = $data['is_require'] ? 1 : 0;
+                                } elseif ($column === 'disabled' && isset($data['disp_flg'])) {
+                                    // disp_flgの値を逆にして disabled に設定
+                                    $value[$column] = !$data['disp_flg'] ? 1 : 0;
+                                } elseif ($column === 'sort_no' && isset($data['rank'])) {
+                                    $value[$column] = $data['rank'];
+                                } elseif ($column === 'create_date' && !isset($data['create_date'])) {
+                                    $value[$column] = date('Y-m-d H:i:s');
+                                } elseif ($column === 'update_date' && !isset($data['update_date'])) {
+                                    $value[$column] = date('Y-m-d H:i:s');
+                                } elseif ($column === 'discriminator_type') {
+                                    $value[$column] = 'customeritem';
+                                } else {
+                                    $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                                }
+                            }
+                            break;
+                        case 'plg_customerplus_dtb_customer_item_option':
+                            foreach ($listTableColumns as $column) {
+                                if ($column === 'sort_no') {
+                                    if (isset($data['sort_no'])) {
+                                        $value[$column] = $data['sort_no'];
+                                    } elseif (isset($data['rank'])) {
+                                        $value[$column] = $data['rank'];
+                                    } else {
+                                        $value[$column] = $i;
+                                    }
+                                } elseif ($column === 'discriminator_type') {
+                                    $value[$column] = 'customeritemoption';
+                                } else {
+                                    $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                                }
+                            }
+                            break;
+                        case 'plg_customerplus_dtb_shipping':
+                            foreach ($listTableColumns as $column) {
+                                if ($column === 'shipping_id' && isset($data['order_id']) && array_key_exists('shipping_id', $data)) {
+                                    // $this->shipping_idマッピングから値を取得
+                                    if (isset($controller->shipping_id[$data['order_id']][$data['shipping_id']])) {
+                                        $value[$column] = $controller->shipping_id[$data['order_id']][$data['shipping_id']];
+                                    } else {
+                                        $value[$column] = null;
+                                    }
+                                } elseif ($column === 'discriminator_type') {
+                                    $value[$column] = 'shipping';
+                                } elseif ($column === 'customer_data_id' && isset($data['value'])) {
+                                    // valueからcustomer_data_idへの変換
+                                    $value[$column] = isset($valueToDataIdMap[$data['value']]) ? $valueToDataIdMap[$data['value']] : null;
+                                } else {
+                                    $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                                }
+                            }
+
+                            break;
+                        case 'plg_customerplus_dtb_order':
+                            foreach ($listTableColumns as $column) {
+                                if ($column === 'customer_data_id' && isset($data['value'])) {
+                                    // valueからcustomer_data_idへの変換
+                                    $value[$column] = isset($valueToDataIdMap[$data['value']]) ? $valueToDataIdMap[$data['value']] : null;
+                                } else {
+                                    $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                                }
+                            }
+                            if (in_array('discriminator_type', $listTableColumns) && !isset($value['discriminator_type'])) {
+                                $value['discriminator_type'] = 'order';
+                            }
+                            break;
+                        case 'plg_customerplus_dtb_customer_address':
+                            foreach ($listTableColumns as $column) {
+                                if ($column === 'customer_data_id' && isset($data['value'])) {
+                                    // valueからcustomer_data_idへの変換
+                                    $value[$column] = isset($valueToDataIdMap[$data['value']]) ? $valueToDataIdMap[$data['value']] : null;
+                                } else {
+                                    $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                                }
+                            }
+                            if (in_array('discriminator_type', $listTableColumns) && !isset($value['discriminator_type'])) {
+                                $value['discriminator_type'] = str_replace('plg_customerplus_dtb_', '', $tableName);
+                            }
+                            break;
+                        default:
+                            foreach ($listTableColumns as $column) {
+                                $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                            }
+                            if (in_array('discriminator_type', $listTableColumns) && !isset($value['discriminator_type'])) {
+                                $value['discriminator_type'] = str_replace('plg_customerplus_dtb_', '', $tableName);
+                            }
+                            break;
+                    }
+
+                    $builder->setValues($value);
+
+                    if (($i % $batchSize) === 0) {
+                        $builder->execute();
+                    }
+                    $i++;
+                }
+                if (count($builder->getValues()) > 0) {
+                    $builder->execute();
+                }
+                fclose($handle);
+            }
+
+            if ($platform == 'mysql') {
+                $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+            }
+            $em->commit();
+
+            $controller->addSuccess($tableName . ' のデータを移行しました。', 'admin');
+        }
+    }
 }
