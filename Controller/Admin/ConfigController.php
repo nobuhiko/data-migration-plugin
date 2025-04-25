@@ -33,7 +33,7 @@ class ConfigController extends AbstractController
     /** @var array */
     protected $stock = [];
     /** @var array */
-    protected $shipping_id = [];
+    public $shipping_id = [];
     /** @var array */
     protected $product_class_id = [];
     /** @var array */
@@ -128,7 +128,7 @@ class ConfigController extends AbstractController
                     // 全データ移行
                     $this->saveCustomer($em, $csvDir);
                     //$this->saveProduct($em, $csvDir);
-                    //$this->saveOrder($em, $csvDir);
+                    $this->saveOrder($em, $csvDir);
                 }
 
                 // plg_customerplusの移行処理を作る

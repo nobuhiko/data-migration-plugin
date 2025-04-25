@@ -349,6 +349,7 @@ class DataMigrationService
      */
     private function parseValueData($dataRow, $customer_item_id = null, $em = null)
     {
+
         // 入力タイプをキャッシュから取得する
         $input_type = isset($this->inputTypeCache[$customer_item_id]) ? $this->inputTypeCache[$customer_item_id] : null;
 
@@ -423,14 +424,13 @@ class DataMigrationService
             }
 
             $value = $v['value'] ?? null;
-            $date_value = $v['date_value'] ?? null;
-            $num_value = $v['num_value'] ?? null;
+            $date_value = $v['date_value'] ?? '';
+            $num_value = $v['num_value'] ?? '';
 
-
-            if (is_array($value)) {
+            /*if (is_array($value)) {
                 dump($value);
                 die();
-            }
+            }*/
 
             $detailCsvRow = [
                 $detailId,
@@ -533,7 +533,8 @@ class DataMigrationService
         $otherTables = [
             'plg_customerplus_dtb_order',
             'plg_customerplus_dtb_shipping',
-            'plg_customerplus_dtb_customer_address'
+            'plg_customerplus_dtb_customer_address',
+            'plg_customerplus_dtb_customer'
         ];
 
         // plg_customerplus_dtb_other_deliv → plg_customerplus_dtb_customer_address へのマッピング
@@ -548,7 +549,7 @@ class DataMigrationService
         }
 
         // 最後にCustomerPlusテーブルのデータを構築
-        $this->buildCustomerPlusTable($em, $csvDir, $controller, $valueToDataIdMap);
+        //$this->buildCustomerPlusTable($em, $csvDir, $controller, $valueToDataIdMap);
 
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
@@ -586,10 +587,8 @@ class DataMigrationService
                 $customer_data_id = $dataId;
 
                 // valueとcustomer_data_idの関連付けを保存
-                $originalValue = isset($dataRow['value']) ? $dataRow['value'] : null;
-                if ($originalValue !== null) {
-                    $valueToDataIdMap[$originalValue] = $customer_data_id;
-                }
+                $originalValue = $dataRow['customer_id'] . '_' . $dataRow['customer_item_id'];
+                $valueToDataIdMap[$originalValue] = $customer_data_id;
 
                 // データCSVに行を追加
                 $dataCsvRow = [
@@ -599,6 +598,12 @@ class DataMigrationService
                     'customerdata'
                 ];
                 fputcsv($dataFp, $dataCsvRow);
+
+                /*
+                if ($dataRow['customer_id'] == 9) {
+                    dump($valueToDataIdMap);
+                    dump($values);
+                }*/
 
                 // 詳細CSVに行を追加
                 $this->addDetailCsvRows($detailFp, $values, $customer_data_id, $detailId);
@@ -663,7 +668,7 @@ class DataMigrationService
 
             while (($row = fgetcsv($handle)) !== false) {
                 $data = $this->convertNULL(array_combine($key, $row));
-                $value = $this->processRowData($tableName, $data, $listTableColumns, $valueToDataIdMap, $controller);
+                $value = $this->processRowData($tableName, $data, $listTableColumns, $valueToDataIdMap, $controller, $em);
 
                 $builder->setValues($value);
 
@@ -690,25 +695,23 @@ class DataMigrationService
      * @param $controller メッセージ出力用（shipping_idマッピング用）
      * @return array 処理後の値
      */
-    private function processRowData($tableName, $data, $listTableColumns, $valueToDataIdMap, $controller)
+    private function processRowData($tableName, $data, $listTableColumns, $valueToDataIdMap, $controller, $em)
     {
         $value = [];
 
         switch ($tableName) {
             case 'plg_customerplus_dtb_shipping':
                 foreach ($listTableColumns as $column) {
-                    if ($column === 'shipping_id' && isset($data['order_id']) && array_key_exists('shipping_id', $data)) {
+                    if ($column === 'shipping_id') {
                         // $this->shipping_idマッピングから値を取得
-                        if (isset($controller->shipping_id[$data['order_id']][$data['shipping_id']])) {
-                            $value[$column] = $controller->shipping_id[$data['order_id']][$data['shipping_id']];
-                        } else {
-                            $value[$column] = null;
-                        }
-                    } elseif ($column === 'discriminator_type') {
-                        $value[$column] = 'shipping';
-                    } elseif ($column === 'customer_data_id' && isset($data['value'])) {
-                        // valueからcustomer_data_idへの変換
-                        $value[$column] = isset($valueToDataIdMap[$data['value']]) ? $valueToDataIdMap[$data['value']] : null;
+                        $value[$column] = $controller->shipping_id[$data['order_id']][$data['shipping_id']];
+                    } elseif ($column === 'customer_data_id') {
+                        $sql = "SELECT customer_id FROM dtb_order WHERE id = ?";
+                        $stmt = $em->executeQuery($sql, [$data['order_id']]);
+                        $result = $stmt->fetchAssociative();
+
+                        // customer_data_idへの変換
+                        $value[$column] = $valueToDataIdMap[$result['customer_id'] . '_' . $data['customer_item_id']] ?? null;
                     } else {
                         $value[$column] = isset($data[$column]) ? $data[$column] : null;
                     }
@@ -716,29 +719,49 @@ class DataMigrationService
                 break;
 
             case 'plg_customerplus_dtb_order':
-            case 'plg_customerplus_dtb_customer_address':
                 foreach ($listTableColumns as $column) {
-                    if ($column === 'customer_data_id' && isset($data['value'])) {
-                        // valueからcustomer_data_idへの変換
-                        $value[$column] = isset($valueToDataIdMap[$data['value']]) ? $valueToDataIdMap[$data['value']] : null;
+                    if ($column === 'customer_data_id') {
+                        $sql = "SELECT customer_id FROM dtb_order WHERE id = ?";
+                        $stmt = $em->executeQuery($sql, [$data['order_id']]);
+                        $result = $stmt->fetchAssociative();
+
+                        // customer_data_idへの変換
+                        $value[$column] = $valueToDataIdMap[$result['customer_id'] . '_' . $data['customer_item_id']] ?? null;
                     } else {
                         $value[$column] = isset($data[$column]) ? $data[$column] : null;
                     }
                 }
-                if (in_array('discriminator_type', $listTableColumns) && !isset($value['discriminator_type'])) {
-                    $value['discriminator_type'] = str_replace('plg_customerplus_dtb_', '', $tableName);
-                }
-                break;
 
-            default:
+                break;
+            case 'plg_customerplus_dtb_customer_address':
                 foreach ($listTableColumns as $column) {
-                    $value[$column] = isset($data[$column]) ? $data[$column] : null;
+
+                    if ($column === 'customer_data_id') {
+                        // customer_data_idへの変換
+                        $value[$column] = $valueToDataIdMap[$data['customer_id'] . '_' . $data['customer_item_id']] ?? null;
+                    } else {
+                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                    }
                 }
-                if (in_array('discriminator_type', $listTableColumns) && !isset($value['discriminator_type'])) {
-                    $value['discriminator_type'] = str_replace('plg_customerplus_dtb_', '', $tableName);
+
+                break;
+            case 'plg_customerplus_dtb_customer':
+
+                foreach ($listTableColumns as $column) {
+
+                    if ($column === 'customer_data_id') {
+                        // customer_data_idへの変換
+                        $value[$column] = $valueToDataIdMap[$data['customer_id'] . '_' . $data['customer_item_id']] ?? null;
+                    } elseif ($column === 'discriminator_type') {
+                        $value[$column] = "customercustom";
+                    } else {
+                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                    }
                 }
                 break;
         }
+
+        $value['discriminator_type'] = str_replace('_', '', str_replace('plg_customerplus_dtb_', '', $tableName . 'custom'));
 
         return $value;
     }
@@ -763,7 +786,7 @@ class DataMigrationService
                 while (($row = fgetcsv($handle)) !== false) {
                     $dataRow = $this->convertNULL(array_combine($key, $row));
                     $customer_id = isset($dataRow['customer_id']) ? $dataRow['customer_id'] : null;
-                    $originalValue = isset($dataRow['value']) ? $dataRow['value'] : null;
+                    $originalValue = $dataRow['customer_id'] . '_' . $dataRow['customer_item_id'];
 
                     if ($customer_id && $originalValue && isset($valueToDataIdMap[$originalValue])) {
                         $customer_data_id = $valueToDataIdMap[$originalValue];
@@ -977,9 +1000,9 @@ class DataMigrationService
         $cacheKey = $option_id . '_' . $customer_item_id;
 
         // キャッシュに結果があればそれを返す
-        if (isset($this->mappingCache[$cacheKey])) {
+        /*if (isset($this->mappingCache[$cacheKey])) {
             return $this->mappingCache[$cacheKey];
-        }
+        }*/
 
         // キャッシュにない場合は検索処理を実行
         foreach ($this->plg_customerplus_dtb_customer_item_option as $option) {
@@ -990,7 +1013,7 @@ class DataMigrationService
                 $stmt = $em->executeQuery($sql, [$customer_item_id, $option['text']]);
                 $result = $stmt->fetchAssociative();
 
-                $this->mappingCache[$cacheKey] = ['num_value' => $result['id'], 'value' => $option['text']];
+                //$this->mappingCache[$cacheKey] = ['num_value' => $result['id'], 'value' => $option['text']];
                 return ['num_value' => $result['id'], 'value' => $option['text']];
             }
         }
