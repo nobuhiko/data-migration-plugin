@@ -2,6 +2,7 @@
 
 namespace Plugin\DataMigration43\Service;
 
+use Eccube\Common\EccubeConfig;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Logging\Middleware;
 use wapmorgan\UnifiedArchive\UnifiedArchive;
@@ -13,9 +14,48 @@ class DataMigrationService
 
     private $params;
 
-    public function __construct(ParameterBagInterface $params)
+    /**
+     * カスタマーアイテムの入力タイプをキャッシュする配列
+     * @var array
+     */
+    private $customerItemTypeCache = [];
+
+    /**
+     * 選択肢オプションのテキスト値をキャッシュする配列
+     * @var array
+     */
+    private $optionTextCache = [];
+
+    /**
+     * Customer item data for migration
+     * @var array
+     */
+    private $plg_customerplus_dtb_customer_item = [];
+
+    /**
+     * 入力タイプをキャッシュする配列
+     * @var array
+     */
+    private $inputTypeCache = [];
+
+    /**
+     * 選択肢オプションの結果をキャッシュする配列
+     * @var array
+     */
+    private $mappingCache = [];
+
+    /**
+     * Customer item option data for migration
+     * @var array
+     */
+    private $plg_customerplus_dtb_customer_item_option = [];
+
+    private $eccubeConfig;
+
+    public function __construct(ParameterBagInterface $params, EccubeConfig $eccubeConfig)
     {
         $this->params = $params;
+        $this->eccubeConfig = $eccubeConfig;
     }
 
     public function disableLogging(Connection $em)
@@ -283,5 +323,644 @@ class DataMigrationService
             fclose($fpcsv);
             fclose($handle);
         }
+    }
+
+    /**
+     * 指定したプラグインコードがインストール済みかどうかを返す
+     *
+     * @param \Doctrine\DBAL\Connection|\Doctrine\ORM\EntityManagerInterface $em
+     * @param string $code
+     * @return bool
+     */
+    public function isPluginInstalled($em, $code)
+    {
+        // DBAL Connection から直接SQLで判定
+        $sql = "SELECT COUNT(*) FROM dtb_plugin WHERE code = ?";
+        $count = $em->fetchOne($sql, [$code]);
+        return $count > 0;
+    }
+
+    /**
+     * 値データを解析し、配列形式に変換
+     * @param array $dataRow データ行
+     * @param int $customer_item_id カスタマー項目ID
+     * @param $em データベース接続
+     * @return array 値の配列
+     */
+    private function parseValueData($dataRow, $customer_item_id = null, $em = null)
+    {
+
+        // 入力タイプをキャッシュから取得する
+        $input_type = isset($this->inputTypeCache[$customer_item_id]) ? $this->inputTypeCache[$customer_item_id] : null;
+
+        $result = [
+            'value' => null,
+            'date_value' => null,
+            'num_value' => null,
+        ];
+
+        // 電話番号タイプの場合は特別な処理
+        if ($input_type == 2) { // TEL_TYPE
+            if (isset($dataRow['value']) && $dataRow['value'] !== null && $dataRow['value'] !== '') {
+                // 電話番号は value にカンマ区切りで部品が保存されている場合がある
+                $result['value'] = str_replace(',', '', $dataRow['value']);
+                return [$result];
+            }
+        }
+
+        // 選択肢タイプの場合
+        else if ($input_type >= 10 && $input_type < 100) { // SELECT_TYPE, RADIO_TYPE, CHECKBOX_TYPE
+            if (isset($dataRow['value']) && $dataRow['value'] !== null && $dataRow['value'] !== '') {
+                $values = explode(',', $dataRow['value']);
+                foreach ($values as $v) {
+                    $optionValue = trim($v);
+                    $res[] = $this->mappingOptionTextCache($em, $optionValue, $customer_item_id);
+                }
+                return $res;
+            }
+        } else if ($input_type == 4) {
+            if (isset($dataRow['value']) && $dataRow['value'] !== null && $dataRow['value'] !== '') {
+                $result['date_value'] = self::convertTz($dataRow['value'], $em);
+            }
+        }
+
+        // 通常のデータ処理
+        if (isset($dataRow['value']) && $dataRow['value'] !== null && $dataRow['value'] !== '') {
+            //$values = @json_decode($dataRow['value'], true);
+            $result['value'] = $dataRow['value'];
+        } else {
+            $result = [null];
+        }
+
+        return [$result];
+    }
+
+    /**
+     * 詳細CSVに行を追加
+     * @param $em
+     * @param resource $detailFp 詳細CSVファイルハンドル
+     * @param array $values 値の配列
+     * @param int $customer_data_id 顧客データID
+     * @param int &$detailId 詳細ID参照
+     * @param string $csvDir CSVファイルのディレクトリ
+     */
+    private function addDetailCsvRows($detailFp, $values, $customer_data_id, &$detailId)
+    {
+        foreach ($values as $v) {
+            if ($v === null) {
+                // nullの場合はすべての値をnullとして保存
+                $detailCsvRow = [
+                    $detailId,
+                    $customer_data_id,
+                    null,
+                    null,
+                    null,
+                    'customerdatadetail'
+                ];
+
+                fputcsv($detailFp, $detailCsvRow);
+                $detailId++;
+                continue;
+            }
+
+            $value = $v['value'] ?? null;
+            $date_value = $v['date_value'] ?? '';
+            $num_value = $v['num_value'] ?? '';
+
+            /*if (is_array($value)) {
+                dump($value);
+                die();
+            }*/
+
+            $detailCsvRow = [
+                $detailId,
+                $customer_data_id,
+                $value,
+                $date_value,
+                $num_value,
+                'customerdatadetail'
+            ];
+
+            fputcsv($detailFp, $detailCsvRow);
+            $detailId++;
+        }
+    }
+
+    /**
+     * plg_customerplusの移行処理
+     * @param $em
+     * @param $csvDir
+     * @param $controller (ConfigController) メッセージ出力用
+     */
+    public function migrateCustomerPlus($em, $csvDir, $controller)
+    {
+        $platform = $this->begin($em);
+
+        // 移行するテーブルの順序を定義
+        $importOrder = [
+            'plg_customerplus_dtb_customer_item',
+            'plg_customerplus_dtb_customer_item_option',
+            'plg_customerplus_dtb_customer_data',
+            'plg_customerplus_dtb_customer_data_detail',
+            'plg_customerplus_dtb_order',
+            'plg_customerplus_dtb_shipping',
+            'plg_customerplus_dtb_customer_address',
+        ];
+
+        // 全テーブルのデータを削除
+        $allTables = array_merge($importOrder, ['plg_customerplus_dtb_customer']);
+        foreach ($allTables as $tableName) {
+            if ($em->getSchemaManager()->tablesExist([$tableName])) {
+                $this->resetTable($em, $tableName);
+            }
+        }
+
+        // CustomerItem, CustomerItemOptionのデータをインポート
+        $baseTableNames = [
+            'plg_customerplus_dtb_customer_item',
+            'plg_customerplus_dtb_customer_item_option'
+        ];
+
+        foreach ($baseTableNames as $tableName) {
+            // CSVファイル名のマッピング処理
+            if ($tableName === 'plg_customerplus_dtb_customer_item_option') {
+                $optionCsv = $csvDir . 'plg_customerplus_dtb_customer_option.csv';
+                $itemOptionCsv = $csvDir . 'plg_customerplus_dtb_customer_item_option.csv';
+                if (file_exists($optionCsv) && !file_exists($itemOptionCsv)) {
+                    rename($optionCsv, $itemOptionCsv);
+                }
+            }
+            $this->importTableFromCsv($em, $csvDir, $controller, $tableName, true);
+        }
+
+        $this->createInputTypeCache();
+
+        // CustomerDataとDetailの生成と保存
+        $customerCsv = $csvDir . 'plg_customerplus_dtb_customer.csv';
+        $dataCsv = $csvDir . 'plg_customerplus_dtb_customer_data.csv';
+        $detailCsv = $csvDir . 'plg_customerplus_dtb_customer_data_detail.csv';
+
+        // 既存データをクリア
+        file_put_contents($dataCsv, '');
+        file_put_contents($detailCsv, '');
+
+        // ヘッダ
+        $dataHeader = ['id', 'customer_item_id', 'create_date', 'discriminator_type'];
+        $detailHeader = ['id', 'customer_data_id', 'value', 'date_value', 'num_value', 'discriminator_type'];
+        $dataFp = fopen($dataCsv, 'w');
+        $detailFp = fopen($detailCsv, 'w');
+        fputcsv($dataFp, $dataHeader);
+        fputcsv($detailFp, $detailHeader);
+
+        // customer_data_idをcustomerごとに採番
+        $dataId = 1;
+        $detailId = 1;
+        $valueToDataIdMap = [];
+
+        if (file_exists($customerCsv) && filesize($customerCsv) > 0) {
+            $this->processCustomerCsv($em, $customerCsv, $dataFp, $detailFp, $dataId, $detailId, $valueToDataIdMap, $csvDir);
+        }
+
+        fclose($dataFp);
+        fclose($detailFp);
+
+        // インポート処理
+        $this->importGeneratedCsvFile($em, $csvDir, $controller, 'plg_customerplus_dtb_customer_data');
+        $this->importGeneratedCsvFile($em, $csvDir, $controller, 'plg_customerplus_dtb_customer_data_detail');
+
+        // その他のテーブルのインポート
+        $otherTables = [
+            'plg_customerplus_dtb_order',
+            'plg_customerplus_dtb_shipping',
+            'plg_customerplus_dtb_customer_address',
+            'plg_customerplus_dtb_customer' // 最後にインポート
+        ];
+
+        // plg_customerplus_dtb_other_deliv → plg_customerplus_dtb_customer_address へのマッピング
+        $otherDelivCsv = $csvDir . 'plg_customerplus_dtb_other_deliv.csv';
+        $customerAddressCsv = $csvDir . 'plg_customerplus_dtb_customer_address.csv';
+        if (file_exists($otherDelivCsv) && !file_exists($customerAddressCsv)) {
+            rename($otherDelivCsv, $customerAddressCsv);
+        }
+
+        foreach ($otherTables as $tableName) {
+            $this->importTableWithValueMapping($em, $csvDir, $controller, $tableName, $valueToDataIdMap);
+        }
+
+        if ($platform == 'mysql') {
+            $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+        } else {
+            foreach ($importOrder as $tableName) {
+                $this->setIdSeq($em, $tableName);
+            }
+        }
+        $em->commit();
+    }
+
+    /**
+     * CustomerCSVファイルを処理し、データと詳細CSVを生成
+     * @param $em
+     * @param string $customerCsv 顧客CSVファイルパス
+     * @param resource $dataFp データCSVファイルハンドル
+     * @param resource $detailFp 詳細CSVファイルハンドル
+     * @param int &$dataId データID参照
+     * @param int &$detailId 詳細ID参照
+     * @param array &$valueToDataIdMap 値とデータIDのマッピング
+     * @param string $csvDir CSVファイルのディレクトリ
+     */
+    private function processCustomerCsv($em, $customerCsv, $dataFp, $detailFp, &$dataId, &$detailId, &$valueToDataIdMap, $csvDir)
+    {
+        if (($handle = fopen($customerCsv, 'r')) !== false) {
+            $key = fgetcsv($handle);
+            $key = array_filter(array_map('trim', $key));
+            while (($row = fgetcsv($handle)) !== false) {
+                $dataRow = $this->convertNULL(array_combine($key, $row));
+
+                // valueカラムが配列やJSONの場合を想定
+                $customer_item_id = isset($dataRow['customer_item_id']) ? $dataRow['customer_item_id'] : null;
+                $values = $this->parseValueData($dataRow, $customer_item_id, $em);
+
+                $customer_id = isset($dataRow['customer_id']) ? $dataRow['customer_id'] : null;
+                $create_date = isset($dataRow['create_date']) ? $dataRow['create_date'] : date('Y-m-d H:i:s');
+
+                // customer_data_idを採番
+                $customer_data_id = $dataId;
+
+                // valueとcustomer_data_idの関連付けを保存
+                $originalValue = $dataRow['customer_id'] . '_' . $dataRow['customer_item_id'];
+                $valueToDataIdMap[$originalValue] = $customer_data_id;
+
+                // データCSVに行を追加
+                $dataCsvRow = [
+                    $customer_data_id,
+                    $customer_item_id,
+                    $create_date,
+                    'customerdata'
+                ];
+                fputcsv($dataFp, $dataCsvRow);
+
+                // 詳細CSVに行を追加
+                $this->addDetailCsvRows($detailFp, $values, $customer_data_id, $detailId);
+
+                $dataId++;
+            }
+            fclose($handle);
+        }
+    }
+
+    /**
+     * 生成されたCSVファイルをインポート
+     * @param $em
+     * @param string $csvDir CSVファイルのディレクトリ
+     * @param $controller メッセージ出力用
+     * @param string $tableName テーブル名
+     */
+    private function importGeneratedCsvFile($em, $csvDir, $controller, $tableName)
+    {
+        $csvFile = $csvDir . $tableName . '.csv';
+
+        if (!file_exists($csvFile) || filesize($csvFile) === 0) {
+            $controller->addWarning($tableName . '.csv が見つからないか空です。', 'admin');
+            return;
+        }
+
+        // 一般的なCSVインポート処理を使用してデータをインポート
+        $this->importTableFromCsv($em, $csvDir, $controller, $tableName);
+    }
+
+    /**
+     * 値マッピングを使用してテーブルをインポート
+     * @param $em
+     * @param string $csvDir CSVファイルのディレクトリ
+     * @param $controller メッセージ出力用
+     * @param string $tableName テーブル名
+     * @param array $valueToDataIdMap 値とデータIDのマッピング
+     */
+    private function importTableWithValueMapping($em, $csvDir, $controller, $tableName, $valueToDataIdMap)
+    {
+        $csvFile = $csvDir . $tableName . '.csv';
+
+        if (!file_exists($csvFile) || filesize($csvFile) === 0) {
+            $controller->addWarning($tableName . '.csv が見つからないか空です。', 'admin');
+            return;
+        }
+
+        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $listTableColumns = [];
+        foreach ($columns as $column) {
+            $listTableColumns[] = $column->getName();
+        }
+
+        $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
+        $builder->setColumns($listTableColumns);
+
+        if (($handle = fopen($csvFile, 'r')) !== false) {
+            $key = fgetcsv($handle);
+            $key = array_filter(array_map('trim', $key));
+            $i = 1;
+            $batchSize = 20;
+
+            while (($row = fgetcsv($handle)) !== false) {
+                $data = $this->convertNULL(array_combine($key, $row));
+                $value = $this->processRowData($tableName, $data, $listTableColumns, $valueToDataIdMap, $controller, $em);
+
+                $builder->setValues($value);
+
+                if (($i % $batchSize) === 0) {
+                    $builder->execute();
+                }
+                $i++;
+            }
+            if (count($builder->getValues()) > 0) {
+                $builder->execute();
+            }
+            fclose($handle);
+        }
+
+        $controller->addSuccess($tableName . ' のデータを移行しました。', 'admin');
+    }
+
+    /**
+     * 行データを処理して値を設定
+     * @param string $tableName テーブル名
+     * @param array $data データ配列
+     * @param array $listTableColumns カラム名リスト
+     * @param array $valueToDataIdMap 値とデータIDのマッピング
+     * @param $controller メッセージ出力用（shipping_idマッピング用）
+     * @return array 処理後の値
+     */
+    private function processRowData($tableName, $data, $listTableColumns, $valueToDataIdMap, $controller, $em)
+    {
+        $value = [];
+
+        switch ($tableName) {
+            case 'plg_customerplus_dtb_shipping':
+                foreach ($listTableColumns as $column) {
+                    if ($column === 'shipping_id') {
+                        // $this->shipping_idマッピングから値を取得
+                        $value[$column] = $controller->shipping_id[$data['order_id']][$data['shipping_id']];
+                    } elseif ($column === 'customer_data_id') {
+                        $sql = "SELECT customer_id FROM dtb_order WHERE id = ?";
+                        $stmt = $em->executeQuery($sql, [$data['order_id']]);
+                        $result = $stmt->fetchAssociative();
+
+                        // customer_data_idへの変換
+                        $value[$column] = $valueToDataIdMap[$result['customer_id'] . '_' . $data['customer_item_id']] ?? null;
+                    } else {
+                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                    }
+                }
+                break;
+
+            case 'plg_customerplus_dtb_order':
+                foreach ($listTableColumns as $column) {
+                    if ($column === 'customer_data_id') {
+                        $sql = "SELECT customer_id FROM dtb_order WHERE id = ?";
+                        $stmt = $em->executeQuery($sql, [$data['order_id']]);
+                        $result = $stmt->fetchAssociative();
+
+                        // customer_data_idへの変換
+                        $value[$column] = $valueToDataIdMap[$result['customer_id'] . '_' . $data['customer_item_id']] ?? null;
+                    } else {
+                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                    }
+                }
+
+                break;
+            case 'plg_customerplus_dtb_customer_address':
+                foreach ($listTableColumns as $column) {
+
+                    if ($column === 'customer_data_id') {
+                        // customer_data_idへの変換
+                        $value[$column] = $valueToDataIdMap[$data['customer_id'] . '_' . $data['customer_item_id']] ?? null;
+                    } else {
+                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                    }
+                }
+
+                break;
+            case 'plg_customerplus_dtb_customer':
+
+                foreach ($listTableColumns as $column) {
+
+                    if ($column === 'customer_data_id') {
+                        // customer_data_idへの変換
+                        $value[$column] = $valueToDataIdMap[$data['customer_id'] . '_' . $data['customer_item_id']] ?? null;
+                    } elseif ($column === 'discriminator_type') {
+                        $value[$column] = "customercustom";
+                    } else {
+                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                    }
+                }
+                break;
+        }
+
+        $value['discriminator_type'] = str_replace('_', '', str_replace('plg_customerplus_dtb_', '', $tableName . 'custom'));
+
+        return $value;
+    }
+
+
+    /**
+     * CSVからテーブルデータをインポート
+     * @param $em
+     * @param string $csvDir CSVファイルのディレクトリ
+     * @param $controller メッセージ出力用
+     * @param string $tableName テーブル名
+     */
+    private function importTableFromCsv($em, $csvDir, $controller, $tableName, $save_flag = false)
+    {
+        $csvFile = $csvDir . $tableName . '.csv';
+
+        if (!file_exists($csvFile) || filesize($csvFile) === 0) {
+            $controller->addWarning($tableName . '.csv が見つからないか空です。', 'admin');
+            return;
+        }
+
+        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $listTableColumns = [];
+        foreach ($columns as $column) {
+            $listTableColumns[] = $column->getName();
+        }
+
+        $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
+        $builder->setColumns($listTableColumns);
+
+        if (($handle = fopen($csvFile, 'r')) !== false) {
+            $key = fgetcsv($handle);
+            $key = array_filter(array_map('trim', $key));
+            $i = 1;
+            $batchSize = 20;
+
+            while (($row = fgetcsv($handle)) !== false) {
+                $data = $this->convertNULL(array_combine($key, $row));
+
+                if ($save_flag) {
+                    $this->$tableName[] = $data;
+                }
+                $value = $this->processCustomerItemData($tableName, $data, $listTableColumns, $i);
+
+                $builder->setValues($value);
+
+                if (($i % $batchSize) === 0) {
+                    $builder->execute();
+                }
+                $i++;
+            }
+            if (count($builder->getValues()) > 0) {
+                $builder->execute();
+            }
+            fclose($handle);
+        }
+
+        $controller->addSuccess($tableName . ' のデータを移行しました。', 'admin');
+    }
+
+    /**
+     * CustomerItem関連データを処理
+     * @param string $tableName テーブル名
+     * @param array $data データ配列
+     * @param array $listTableColumns カラム名リスト
+     * @param int $index インデックス（ソート番号用）
+     * @return array 処理後の値
+     */
+    private function processCustomerItemData($tableName, $data, $listTableColumns, $index)
+    {
+        $value = [];
+
+        switch ($tableName) {
+            case 'plg_customerplus_dtb_customer_item':
+                foreach ($listTableColumns as $column) {
+                    if ($column === 'id' && isset($data['customer_item_id'])) {
+                        $value[$column] = $data['customer_item_id'];
+                    } elseif ($column === 'name' && isset($data['title'])) {
+                        $value[$column] = $data['title'];
+                    } elseif ($column === 'input_type' && isset($data['input_type'])) {
+                        // 旧データのinput_typeを新プラグインの仕様に合わせて変換
+                        $value[$column] = $this->convertInputType($data['input_type']);
+                    } elseif ($column === 'is_required' && isset($data['is_require'])) {
+                        $value[$column] = $data['is_require'] ? 1 : 0;
+                    } elseif ($column === 'disabled' && isset($data['disp_flg'])) {
+                        // disp_flgの値を逆にして disabled に設定
+                        $value[$column] = !$data['disp_flg'] ? 1 : 0;
+                    } elseif ($column === 'sort_no' && isset($data['rank'])) {
+                        $value[$column] = $data['rank'];
+                    } elseif ($column === 'create_date' && !isset($data['create_date'])) {
+                        $value[$column] = date('Y-m-d H:i:s');
+                    } elseif ($column === 'update_date' && !isset($data['update_date'])) {
+                        $value[$column] = date('Y-m-d H:i:s');
+                    } elseif ($column === 'discriminator_type') {
+                        $value[$column] = 'customeritem';
+                    } else {
+                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                    }
+                }
+                break;
+
+            case 'plg_customerplus_dtb_customer_item_option':
+                foreach ($listTableColumns as $column) {
+                    if ($column === 'sort_no') {
+                        if (isset($data['sort_no'])) {
+                            $value[$column] = $data['sort_no'];
+                        } elseif (isset($data['rank'])) {
+                            $value[$column] = $data['rank'];
+                        } else {
+                            $value[$column] = $index;
+                        }
+                    } elseif ($column === 'discriminator_type') {
+                        $value[$column] = 'customeritemoption';
+                    } else {
+                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                    }
+                }
+                break;
+
+            default:
+                foreach ($listTableColumns as $column) {
+                    $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                }
+                if (in_array('discriminator_type', $listTableColumns) && !isset($value['discriminator_type'])) {
+                    $value['discriminator_type'] = str_replace('plg_customerplus_dtb_', '', $tableName);
+                }
+                break;
+        }
+
+        return $value;
+    }
+
+    /**
+     * 旧データのinput_typeを新プラグインの仕様に合わせて変換
+     * @param int $inputType 入力タイプ
+     * @return int|string 変換後の入力タイプ
+     */
+    private function convertInputType($inputType)
+    {
+        // 旧データのinput_typeを新プラグインの仕様に合わせて変換
+        switch ($inputType) {
+            case 1: // テキストボックス
+                return 1;
+            case 2: // 電話
+                return 3;
+            case 3: // 郵便
+                return '';
+            case 4: // 日付
+                return 4;
+            case 5: // テキストエリア
+                return 2;
+            case 10: // ラジオボタン
+                return 11;
+            case 11: // セレクトボックス
+                return 10;
+            case 12: // チェックボックス
+                return 12; // 'checkbox' から数値に修正
+            default:
+                return $inputType; // デフォルトはtext
+        }
+    }
+
+
+    private function createInputTypeCache()
+    {
+        foreach ($this->plg_customerplus_dtb_customer_item as $customerItem) {
+            $this->inputTypeCache[$customerItem['customer_item_id']] = $customerItem['input_type'];
+        }
+    }
+    private function mappingOptionTextCache($em, $option_id, $customer_item_id)
+    {
+        // キャッシュキーを生成
+        $cacheKey = $option_id . '_' . $customer_item_id;
+
+        // キャッシュに結果があればそれを返す
+        /*if (isset($this->mappingCache[$cacheKey])) {
+            return $this->mappingCache[$cacheKey];
+        }*/
+
+        // キャッシュにない場合は検索処理を実行
+        foreach ($this->plg_customerplus_dtb_customer_item_option as $option) {
+            if ($option['option_id'] == $option_id && $option['customer_item_id'] == $customer_item_id) {
+
+                // $option['text'] $option['customer_item_id'] と使って plg_customerplus_dtb_customer_item_option テーブルから id を取得する
+                $sql = "SELECT id FROM plg_customerplus_dtb_customer_item_option WHERE customer_item_id = ? AND text = ?";
+                $stmt = $em->executeQuery($sql, [$customer_item_id, $option['text']]);
+                $result = $stmt->fetchAssociative();
+
+                //$this->mappingCache[$cacheKey] = ['num_value' => $result['id'], 'value' => $option['text']];
+                return ['num_value' => $result['id'], 'value' => $option['text']];
+            }
+        }
+
+        // 見つからない場合はnullをキャッシュして返す
+        $this->mappingCache[$cacheKey] = null;
+        return null;
+    }
+
+
+    // タイムゾーンの変換
+    private function convertTz($datetime, $em)
+    {
+        $date = new \DateTime($datetime, new \DateTimeZone($this->eccubeConfig->get('timezone')));
+        $date->setTimezone(new \DateTimeZone('UTC'));
+
+        return $date->format($em->getDatabasePlatform()->getDateTimeTzFormatString());
     }
 }

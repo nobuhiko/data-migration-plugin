@@ -68,27 +68,36 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             $post['config']['customer_order_only'] = 1;
         }
 
-        $this->client->request(
-            'POST',
-            $this->generateUrl('data_migration42_admin_config'),
-            $post,
-            ['config' => ['import_file' => $file]]
-        );
-
-        $customers = $this->entityManager->getRepository(Customer::class)->findAll();
-        self::assertEquals($c, count($customers));
-
-        if ($p > 0) {
-            $products = $this->entityManager->getRepository(Product::class)->findAll();
-            self::assertEquals($p, count($products));
+        try {
+            $this->client->request(
+                'POST',
+                $this->generateUrl('data_migration43_admin_config'),
+                $post,
+                ['config' => ['import_file' => $file]]
+            );
+            
+            $customers = $this->entityManager->getRepository(Customer::class)->findAll();
+            self::assertEquals($c, count($customers));
+    
+            if ($p > 0) {
+                $products = $this->entityManager->getRepository(Product::class)->findAll();
+                self::assertEquals($p, count($products));
+            }
+    
+            $orders = $this->entityManager->getRepository(Order::class)->findAll();
+            self::assertEquals($o, count($orders));
+    
+            // ECCUBE_AUTH_MAGICの値を取得してアサート
+            //$eccubeConfig = $container->get('Eccube\Common\EccubeConfig');
+            //$authMagic = $eccubeConfig->get('eccube_auth_magic');
+            //self::assertEquals('dummy', $authMagic);
+        } catch (\Exception $e) {
+            // エラーが発生した場合は、トランザクションをリセットしてから例外を再スローする
+            if ($this->entityManager->getConnection()->isTransactionActive()) {
+                $this->entityManager->getConnection()->rollBack();
+                $this->entityManager->getConnection()->beginTransaction();
+            }
+            throw $e;
         }
-
-        $orders = $this->entityManager->getRepository(Order::class)->findAll();
-        self::assertEquals($o, count($orders));
-
-        // ECCUBE_AUTH_MAGICの値を取得してアサート
-        //$eccubeConfig = $container->get('Eccube\Common\EccubeConfig');
-        //$authMagic = $eccubeConfig->get('eccube_auth_magic');
-        //self::assertEquals('dummy', $authMagic);
     }
 }

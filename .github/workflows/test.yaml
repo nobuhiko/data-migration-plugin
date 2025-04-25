@@ -67,10 +67,10 @@ jobs:
           - 1025:1025
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Setup PHP
-        uses: nanasess/setup-php@master
+        uses: nanasess/setup-php@v4
         with:
           php-version: ${{ matrix.php }}
 
@@ -89,14 +89,13 @@ jobs:
             docker run --name package-api -d -v /tmp/repos:/repos -e MOCK_REPO_DIR=/repos -p 8080:8080 eccube/mock-package-api:composer2
 
       - name: Checkout EC-CUBE
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: "EC-CUBE/ec-cube"
           ref: ${{ matrix.eccube_version }}
           path: "ec-cube"
 
       - name: Get Composer Cache Directory
-        id: composer-cache
         run: |
           echo "COMPOSER_CACHE_DIR=$(composer config cache-files-dir)" >> $GITHUB_ENV
 

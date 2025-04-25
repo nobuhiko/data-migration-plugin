@@ -33,7 +33,7 @@ class ConfigController extends AbstractController
     /** @var array */
     protected $stock = [];
     /** @var array */
-    protected $shipping_id = [];
+    public $shipping_id = [];
     /** @var array */
     protected $product_class_id = [];
     /** @var array */
@@ -130,6 +130,11 @@ class ConfigController extends AbstractController
                     $this->saveProduct($em, $csvDir);
                     $this->saveOrder($em, $csvDir);
                 }
+
+                // plg_customerplusの移行処理を作る
+                if ($this->dataMigrationService->isVersion('2') && $this->dataMigrationService->isPluginInstalled($em, 'CustomerPlus42')) {
+                    $this->dataMigrationService->migrateCustomerPlus($em, $csvDir, $this);
+                }
             }
 
             // 削除
@@ -139,7 +144,15 @@ class ConfigController extends AbstractController
             // .envのECCUBE_AUTH_MAGICを書き換える
             $this->dataMigrationService->updateEnv($form['auth_magic']->getData());
 
-            return $this->redirectToRoute('data_migration42_admin_config');
+            // 存在しないルート名を修正
+            return $this->redirectToRoute('data_migration43_admin_config');
+        }
+
+        // バリデーションエラー時の内容を確認
+        if ($form->isSubmitted() && !$form->isValid()) {
+            foreach ($form->getErrors(true) as $error) {
+                $this->addDanger($error->getMessage(), 'admin');
+            }
         }
 
         return [
@@ -1287,14 +1300,14 @@ class ConfigController extends AbstractController
                             $value[$column] = 1;
                         } elseif ($column == 'rule_max') {
                             if ($this->dataMigrationService->isVersion('3')) {
-                                $value[$column] = isset($data['rule_max']) && strlen($data['rule_max']) > 0 ? $data['rule_max'] : null;
+                                $value[$column] = isset($data['rule_max']) && strlen($data['rule_max'] > 0 ? $data['rule_max'] : null);
                             } else {
                                 // 2.13
                                 $value[$column] = !empty($data['upper_rule']) ? $data['upper_rule'] : null;
                             }
                         } elseif ($column == 'rule_min') {
                             if ($this->dataMigrationService->isVersion('3')) {
-                                $value[$column] = isset($data['rule_min']) && strlen($data['rule_min']) > 0 ? $data['rule_min'] : null;
+                                $value[$column] = isset($data['rule_min']) && strlen($data['rule_min'] > 0 ? $data['rule_min'] : null);
                             } else {
                                 // 2.13
                                 $value[$column] = !empty($data['rule_max']) ? $data['rule_max'] : (!empty($data['rule']) ? $data['rule'] : null);
@@ -1377,33 +1390,31 @@ class ConfigController extends AbstractController
                         break;
 
                     case 'dtb_shipping':
-                        if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
-                            $value['id'] = $i;
-                            $this->shipping_id[$data['order_id']][$data['shipping_id']] = $i;
+                        $value['id'] = $i;
+                        $this->shipping_id[$data['order_id']][$data['shipping_id']] = $i;
 
-                            if ($this->dataMigrationService->isVersion('3')) {
-                                if (isset($data['delivery_id']) & strlen($data['delivery_id']) > 0) {
-                                    $value['delivery_id'] = $data['delivery_id'];
-                                } else {
-                                    $value['delivery_id'] = null;
-                                }
-                                if (isset($data['time_id']) && strlen($data['time_id']) > 0) {
-                                    $value['time_id'] = $this->delivery_time[$data['delivery_id']][$data['time_id']];
-                                }
+                        if ($this->dataMigrationService->isVersion('3')) {
+                            if (isset($data['delivery_id']) & strlen($data['delivery_id']) > 0) {
+                                $value['delivery_id'] = $data['delivery_id'];
                             } else {
-                                $value['delivery_id'] = !empty($this->delivery_id[$value['order_id']]) ? $this->delivery_id[$value['order_id']] : null;
-                                $value['delivery_time'] = empty($data['time']) ? null : $data['time'];
-                                if (isset($data['time_id']) && strlen($data['time_id']) > 0) {
-                                    if (!empty($this->delivery_time)) {
-                                        $value['time_id'] = $this->delivery_time[$value['delivery_id']][$data['time_id']];
-                                    }
+                                $value['delivery_id'] = null;
+                            }
+                            if (isset($data['time_id']) && strlen($data['time_id']) > 0) {
+                                $value['time_id'] = $this->delivery_time[$data['delivery_id']][$data['time_id']];
+                            }
+                        } else {
+                            $value['delivery_id'] = !empty($this->delivery_id[$value['order_id']]) ? $this->delivery_id[$value['order_id']] : null;
+                            $value['delivery_time'] = empty($data['time']) ? null : $data['time'];
+                            if (isset($data['time_id']) && strlen($data['time_id']) > 0) {
+                                if (!empty($this->delivery_time)) {
+                                    $value['time_id'] = $this->delivery_time[$value['delivery_id']][$data['time_id']];
                                 }
-                                // dtb_shipping.shipping_commit_dateが空の場合は、dtb_order.commit_dateを使用
-                                if (!empty($data['shipping_commit_date'])) {
-                                    $value['shipping_date'] = $data['shipping_commit_date'];
-                                } elseif (!empty($this->shipping_order[$data['order_id']]['commit_date'])) {
-                                    $value['shipping_date'] = $this->shipping_order[$data['order_id']]['commit_date'];
-                                }
+                            }
+                            // dtb_shipping.shipping_commit_dateが空の場合は、dtb_order.commit_dateを使用
+                            if (!empty($data['shipping_commit_date'])) {
+                                $value['shipping_date'] = $data['shipping_commit_date'];
+                            } elseif (!empty($this->shipping_order[$data['order_id']]['commit_date'])) {
+                                $value['shipping_date'] = $this->shipping_order[$data['order_id']]['commit_date'];
                             }
                         }
 
