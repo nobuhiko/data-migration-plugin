@@ -70,7 +70,7 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
 
         $this->client->request(
             'POST',
-            $this->generateUrl('data_migration42_admin_config'),
+            $this->generateUrl('data_migration43_admin_config'),
             $post,
             ['config' => ['import_file' => $file]]
         );
