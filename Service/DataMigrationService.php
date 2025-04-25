@@ -494,7 +494,6 @@ class DataMigrationService
         }
 
         $this->createInputTypeCache();
-        //$this->createOptionTextCache();
 
         // CustomerDataとDetailの生成と保存
         $customerCsv = $csvDir . 'plg_customerplus_dtb_customer.csv';
@@ -534,7 +533,7 @@ class DataMigrationService
             'plg_customerplus_dtb_order',
             'plg_customerplus_dtb_shipping',
             'plg_customerplus_dtb_customer_address',
-            'plg_customerplus_dtb_customer'
+            'plg_customerplus_dtb_customer' // 最後にインポート
         ];
 
         // plg_customerplus_dtb_other_deliv → plg_customerplus_dtb_customer_address へのマッピング
@@ -548,11 +547,12 @@ class DataMigrationService
             $this->importTableWithValueMapping($em, $csvDir, $controller, $tableName, $valueToDataIdMap);
         }
 
-        // 最後にCustomerPlusテーブルのデータを構築
-        //$this->buildCustomerPlusTable($em, $csvDir, $controller, $valueToDataIdMap);
-
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+        } else {
+            foreach ($importOrder as $tableName) {
+                $this->setIdSeq($em, $tableName);
+            }
         }
         $em->commit();
     }
@@ -598,12 +598,6 @@ class DataMigrationService
                     'customerdata'
                 ];
                 fputcsv($dataFp, $dataCsvRow);
-
-                /*
-                if ($dataRow['customer_id'] == 9) {
-                    dump($valueToDataIdMap);
-                    dump($values);
-                }*/
 
                 // 詳細CSVに行を追加
                 $this->addDetailCsvRows($detailFp, $values, $customer_data_id, $detailId);
@@ -766,69 +760,6 @@ class DataMigrationService
         return $value;
     }
 
-    /**
-     * CustomerPlusテーブルのデータを構築
-     * @param $em
-     * @param string $csvDir CSVファイルのディレクトリ
-     * @param $controller メッセージ出力用
-     * @param array $valueToDataIdMap 値とデータIDのマッピング
-     */
-    private function buildCustomerPlusTable($em, $csvDir, $controller, $valueToDataIdMap)
-    {
-        // plg_customerplus_dtb_customerからデータを処理
-        $customerCsv = $csvDir . 'plg_customerplus_dtb_customer.csv';
-        $customerRowsForUpdate = [];
-
-        if (file_exists($customerCsv) && filesize($customerCsv) > 0) {
-            if (($handle = fopen($customerCsv, 'r')) !== false) {
-                $key = fgetcsv($handle);
-                $key = array_filter(array_map('trim', $key));
-                while (($row = fgetcsv($handle)) !== false) {
-                    $dataRow = $this->convertNULL(array_combine($key, $row));
-                    $customer_id = isset($dataRow['customer_id']) ? $dataRow['customer_id'] : null;
-                    $originalValue = $dataRow['customer_id'] . '_' . $dataRow['customer_item_id'];
-
-                    if ($customer_id && $originalValue && isset($valueToDataIdMap[$originalValue])) {
-                        $customer_data_id = $valueToDataIdMap[$originalValue];
-                        $customerRowsForUpdate[$customer_id][] = $customer_data_id;
-                    }
-                }
-                fclose($handle);
-            }
-        }
-
-        // plg_customerplus_dtb_customer
-        $this->resetTable($em, "plg_customerplus_dtb_customer");
-        $columns = $em->getSchemaManager()->listTableColumns("plg_customerplus_dtb_customer");
-        $listTableColumns = [];
-        foreach ($columns as $column) {
-            $listTableColumns[] = $column->getName();
-        }
-
-        $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, "plg_customerplus_dtb_customer");
-        $builder->setColumns($listTableColumns);
-        $plg_customerplus_dtb_customer_i = 1;
-
-        foreach ($customerRowsForUpdate as $customer_id => $customerDataIds) {
-            foreach ($customerDataIds as $customer_data_id) {
-                $row = [
-                    'id' => $plg_customerplus_dtb_customer_i,
-                    'customer_id' => $customer_id,
-                    'customer_data_id' => $customer_data_id,
-                    'customer_item_id' => 1, // デフォルト値として1を設定
-                    'create_date' => date('Y-m-d H:i:s'),
-                    'discriminator_type' => 'customercustom'
-                ];
-                $builder->setValues($row);
-                $builder->execute(); // 1件ずつ即時実行
-                $plg_customerplus_dtb_customer_i++;
-            }
-
-            $plg_customerplus_dtb_customer_i++;
-        }
-
-        $controller->addSuccess('plg_customerplus_dtb_customer のデータを移行しました。', 'admin');
-    }
 
     /**
      * CSVからテーブルデータをインポート

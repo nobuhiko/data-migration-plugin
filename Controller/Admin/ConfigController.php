@@ -127,7 +127,7 @@ class ConfigController extends AbstractController
                 } else {
                     // 全データ移行
                     $this->saveCustomer($em, $csvDir);
-                    //$this->saveProduct($em, $csvDir);
+                    $this->saveProduct($em, $csvDir);
                     $this->saveOrder($em, $csvDir);
                 }
 
@@ -246,7 +246,7 @@ class ConfigController extends AbstractController
             }
 
             $this->saveToC($em, $csvDir, 'mtb_authority', null, true);
-            //$this->saveToC($em, $csvDir, 'dtb_member', null, true);
+            $this->saveToC($em, $csvDir, 'dtb_member', null, true);
 
             if ($platform == 'mysql') {
                 $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
