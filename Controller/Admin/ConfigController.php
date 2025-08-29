@@ -278,8 +278,9 @@ class ConfigController extends AbstractController
             return;
         }
 
-        if (($handle = fopen($tmpDir . $csvName . '.csv', 'r')) !== false) {
-            // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
+        $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpDir . $csvName . '.csv');
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -530,31 +531,9 @@ class ConfigController extends AbstractController
             return;
         }
 
-        // CSVファイルのエンコーディング修復を試行
-        $repairResult = $this->dataMigrationService->repairCsvEncoding($csvFilePath);
-        
-        if (!$repairResult['success']) {
-            $this->addError($repairResult['message'], 'admin');
-            return;
-        }
-
-        // 修復されたファイルまたは元ファイルを使用
-        $processedCsvFile = $repairResult['repaired_file'] ?? $csvFilePath;
-        
-        // 修復メッセージを表示
-        if ($repairResult['repaired_file']) {
-            $this->addSuccess($repairResult['message'], 'admin');
-        }
-
-        // エラー行がある場合の警告
-        if (!empty($repairResult['error_lines'])) {
-            $errorCount = count($repairResult['error_lines']);
-            $this->addWarning("CSV処理中に {$errorCount} 行をスキップします: " . 
-                            implode(', ', array_slice($repairResult['error_lines'], 0, 10)), 'admin');
-        }
-
-        if (($handle = fopen($processedCsvFile, 'r')) !== false) {
-            // エンコーディング修復済みファイルを処理
+        $csvResult = $this->dataMigrationService->openCsvWithEncoding($csvFilePath);
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -571,21 +550,14 @@ class ConfigController extends AbstractController
 
             $batchSize = 20;
             $lineNumber = 2; // ヘッダーの次から開始
-            $skipLines = $repairResult['error_lines'] ?? [];
             $processedCount = 0;
             $skippedCount = 0;
 
             while (($row = fgetcsv($handle)) !== false) {
-                // エラー行をスキップ
-                if (in_array($lineNumber, $skipLines)) {
-                    $skippedCount++;
-                    $lineNumber++;
-                    continue;
-                }
 
                 // カラム数チェック
                 if (count($row) !== count($key)) {
-                    $this->addWarning("行 {$lineNumber}: カラム数不整合をスキップ (" . count($row) . " != " . count($key) . ")", 'admin');
+                    $this->addWarning("{$csvName}.csv 行 {$lineNumber}: カラム数不整合をスキップ (" . count($row) . " != " . count($key) . ")", 'admin');
                     $skippedCount++;
                     $lineNumber++;
                     continue;
@@ -839,7 +811,9 @@ class ConfigController extends AbstractController
 
     private function fix24shipping($em, $tmpdir)
     {
-        if (($handle = fopen($tmpdir . 'dtb_order.csv', 'r')) !== false) {
+        $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpdir . 'dtb_order.csv');
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -893,7 +867,9 @@ class ConfigController extends AbstractController
     // 2.4系のclassを追加する
     private function fix24ProductsClass($em, $tmpDir)
     {
-        if (($handle = fopen($tmpDir . 'dtb_products_class.csv', 'r')) !== false) {
+        $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpDir . 'dtb_products_class.csv');
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -928,7 +904,9 @@ class ConfigController extends AbstractController
 
     private function fix211classCombination($em, $platform, $tmpDir)
     {
-        if (($handle = fopen($tmpDir . 'dtb_class_combination.csv', 'r')) !== false) {
+        $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpDir . 'dtb_class_combination.csv');
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -1203,8 +1181,9 @@ class ConfigController extends AbstractController
             return;
         }
 
-        if (($handle = fopen($tmpDir . $csvName . '.csv', 'r')) !== false) {
-            // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
+        $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpDir . $csvName . '.csv');
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -1711,7 +1690,9 @@ class ConfigController extends AbstractController
             return;
         }
 
-        if (($handle = fopen($tmpDir . 'dtb_baseinfo.csv', 'r')) !== false) {
+        $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpDir . 'dtb_baseinfo.csv');
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -1750,7 +1731,9 @@ class ConfigController extends AbstractController
             return;
         }
 
-        if (($handle = fopen($tmpDir . 'plg_point_customer.csv', 'r')) !== false) {
+        $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpDir . 'plg_point_customer.csv');
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -1823,8 +1806,9 @@ class ConfigController extends AbstractController
 
         $batchSize = 20;
 
-        if (($handle = fopen($tmpDir . $csvName, 'r')) !== false) {
-            // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
+        $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpDir . $csvName);
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));

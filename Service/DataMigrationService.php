@@ -245,7 +245,9 @@ class DataMigrationService
         $tbl_flg = false;
         $col_flg = false;
 
-        if (($handle = fopen($tmpDir . $csvName, 'r')) !== false) {
+        $csvResult = $this->openCsvWithEncoding($tmpDir . $csvName);
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $fpcsv = '';
             while (($row = fgetcsv($handle)) !== false) {
                 //空白行のときはテーブル変更
@@ -570,7 +572,9 @@ class DataMigrationService
      */
     private function processCustomerCsv($em, $customerCsv, $dataFp, $detailFp, &$dataId, &$detailId, &$valueToDataIdMap, $csvDir)
     {
-        if (($handle = fopen($customerCsv, 'r')) !== false) {
+        $csvResult = $this->openCsvWithEncoding($customerCsv);
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             $key = array_filter(array_map('trim', $key));
             while (($row = fgetcsv($handle)) !== false) {
@@ -654,7 +658,9 @@ class DataMigrationService
         $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        if (($handle = fopen($csvFile, 'r')) !== false) {
+        $csvResult = $this->openCsvWithEncoding($csvFile);
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             $key = array_filter(array_map('trim', $key));
             $i = 1;
@@ -786,7 +792,9 @@ class DataMigrationService
         $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        if (($handle = fopen($csvFile, 'r')) !== false) {
+        $csvResult = $this->openCsvWithEncoding($csvFile);
+        if ($csvResult['handle'] !== false) {
+            $handle = $csvResult['handle'];
             $key = fgetcsv($handle);
             $key = array_filter(array_map('trim', $key));
             $i = 1;
@@ -964,250 +972,73 @@ class DataMigrationService
         return $date->format($em->getDatabasePlatform()->getDateTimeTzFormatString());
     }
 
+
+
+
     /**
-     * CSVファイルのエンコーディングを検出・修復する
-     *
+     * エンコーディングを考慮してCSVファイルを開く
+     * メモリ効率を重視し、ストリームフィルタを使用
+     * 
      * @param string $csvFilePath CSVファイルパス
-     * @return array ['success' => bool, 'message' => string, 'repaired_file' => string|null, 'error_lines' => array]
+     * @param string|null $encoding 検出されたエンコーディング（nullの場合は自動検出）
+     * @return array [handle => resource|false, encoding => string|null, message => string]
      */
-    public function repairCsvEncoding($csvFilePath)
+    public function openCsvWithEncoding($csvFilePath, $encoding = null)
     {
         if (!file_exists($csvFilePath)) {
             return [
-                'success' => false,
-                'message' => 'CSVファイルが見つかりません: ' . $csvFilePath,
-                'repaired_file' => null,
-                'error_lines' => []
+                'handle' => false,
+                'encoding' => null,
+                'message' => 'CSVファイルが見つかりません: ' . $csvFilePath
             ];
         }
 
-        $content = file_get_contents($csvFilePath);
-        $originalEncoding = mb_detect_encoding($content, ['UTF-8', 'SJIS', 'EUC-JP', 'ASCII'], true);
-
-        // エンコーディング変換候補
-        $encodings = ['ISO-2022-JP', 'SJIS', 'EUC-JP', 'CP932'];
-        $bestResult = null;
-        $bestScore = 0;
-        $bestEncoding = null;
-
-        foreach ($encodings as $sourceEncoding) {
-            try {
-                $converted = mb_convert_encoding($content, 'UTF-8', $sourceEncoding);
-                $score = $this->evaluateCsvQuality($converted);
-
-                if ($score > $bestScore) {
-                    $bestScore = $score;
-                    $bestResult = $converted;
-                    $bestEncoding = $sourceEncoding;
-                }
-            } catch (\Exception $e) {
-                // 変換失敗は無視して次へ
-                continue;
-            }
+        // ファイルサイズチェック（メモリ効率のため）
+        $fileSize = filesize($csvFilePath);
+        if ($fileSize > 100 * 1024 * 1024) { // 100MB制限
+            return [
+                'handle' => false,
+                'encoding' => null,
+                'message' => 'ファイルサイズが大きすぎます（100MB以上）'
+            ];
         }
 
-        // UTF-8の場合はそのまま処理可能とする
-        if ($originalEncoding === 'UTF-8') {
-            // エラー行を検出
-            $errorLines = $this->detectCsvErrors($csvFilePath);
+        $handle = fopen($csvFilePath, 'r');
+        if (!$handle) {
+            return [
+                'handle' => false,
+                'encoding' => null,
+                'message' => 'CSVファイルを開けません: ' . $csvFilePath
+            ];
+        }
+
+        // エンコーディングが指定されていない場合は検出
+        if ($encoding === null) {
+            // 先頭1KBのサンプルで検出（メモリ効率重視）
+            $sample = fread($handle, 1024);
+            rewind($handle);
+            $encoding = mb_detect_encoding($sample, ['UTF-8', 'SJIS', 'EUC-JP', 'ISO-2022-JP'], true);
+        }
+
+        // UTF-8以外の場合はストリームフィルタを適用
+        if ($encoding && $encoding !== 'UTF-8') {
+            $filterName = "convert.iconv.{$encoding}/UTF-8//IGNORE";
+            $filter = stream_filter_append($handle, $filterName);
             
-            return [
-                'success' => true,
-                'message' => 'CSVファイルはUTF-8形式です。',
-                'repaired_file' => null, // 修復不要
-                'error_lines' => $errorLines,
-                'original_encoding' => 'UTF-8',
-                'converted_encoding' => null,
-                'quality_score' => 100
-            ];
-        }
-        
-        // 修復品質の評価
-        if ($bestScore < 80) {
-            return [
-                'success' => false,
-                'message' => 'CSVファイルの文字エンコーディングが破損しているか、対応していない形式です。' .
-                           '元のシステムから新しいCSVファイルを取得し直してください。' .
-                           "（検出エンコーディング: {$originalEncoding}、最高スコア: " . number_format($bestScore, 1) . "%）",
-                'repaired_file' => null,
-                'error_lines' => []
-            ];
-        }
-
-        // 修復ファイルを作成
-        $repairedFile = $csvFilePath . '.repaired';
-        file_put_contents($repairedFile, $bestResult);
-
-        // エラー行を検出
-        $errorLines = $this->detectCsvErrors($repairedFile);
-
-        $message = '';
-        if ($bestScore < 95) {
-            $message = "CSVファイルのエンコーディングを {$bestEncoding} から UTF-8 に変換しました。" .
-                      "品質スコア: " . number_format($bestScore, 1) . "%";
-        } else {
-            $message = "CSVファイルのエンコーディングを正常に修復しました。";
-        }
-
-        if (!empty($errorLines)) {
-            $message .= "\n注意: " . count($errorLines) . "行でデータ不整合が検出されました。";
-            $message .= "\nエラー行: " . implode(', ', array_slice($errorLines, 0, 10));
-            if (count($errorLines) > 10) {
-                $message .= " など";
+            if (!$filter) {
+                fclose($handle);
+                return [
+                    'handle' => false,
+                    'encoding' => $encoding,
+                    'message' => "エンコーディング変換フィルタを適用できません: {$encoding}"
+                ];
             }
         }
 
         return [
-            'success' => true,
-            'message' => $message,
-            'repaired_file' => $repairedFile,
-            'error_lines' => $errorLines,
-            'original_encoding' => $originalEncoding,
-            'converted_encoding' => $bestEncoding,
-            'quality_score' => $bestScore
-        ];
-    }
-
-    /**
-     * CSV品質を評価する
-     *
-     * @param string $csvContent CSVファイル内容
-     * @return float 品質スコア（0-100）
-     */
-    private function evaluateCsvQuality($csvContent)
-    {
-        $handle = tmpfile();
-        fwrite($handle, $csvContent);
-        rewind($handle);
-
-        $headers = fgetcsv($handle);
-        if ($headers === false) {
-            fclose($handle);
-            return 0;
-        }
-
-        $headerCount = count($headers);
-        $validRows = 0;
-        $totalRows = 0;
-        $maxCheckRows = 200; // 最初の200行をチェック
-
-        while (($row = fgetcsv($handle)) !== false && $totalRows < $maxCheckRows) {
-            $totalRows++;
-            if (count($row) === $headerCount) {
-                $validRows++;
-            }
-        }
-
-        fclose($handle);
-
-        if ($totalRows === 0) {
-            return 0;
-        }
-
-        return ($validRows / $totalRows) * 100;
-    }
-
-    /**
-     * CSVファイルのエラー行を検出する
-     *
-     * @param string $csvFilePath CSVファイルパス
-     * @return array エラー行番号の配列
-     */
-    private function detectCsvErrors($csvFilePath)
-    {
-        $errorLines = [];
-        $handle = fopen($csvFilePath, 'r');
-
-        if ($handle === false) {
-            return $errorLines;
-        }
-
-        $headers = fgetcsv($handle);
-        if ($headers === false) {
-            fclose($handle);
-            return $errorLines;
-        }
-
-        $headerCount = count($headers);
-        $lineNumber = 2; // ヘッダーの次の行から開始
-
-        while (($row = fgetcsv($handle)) !== false) {
-            if (count($row) !== $headerCount) {
-                $errorLines[] = $lineNumber;
-            }
-            $lineNumber++;
-        }
-
-        fclose($handle);
-        return $errorLines;
-    }
-
-    /**
-     * エラー行をスキップしてCSVを処理する
-     *
-     * @param string $csvFilePath CSVファイルパス
-     * @param array $skipLines スキップする行番号の配列
-     * @param callable $processor 行処理コールバック
-     * @return array 処理結果
-     */
-    public function processCsvWithSkip($csvFilePath, array $skipLines, callable $processor)
-    {
-        $handle = fopen($csvFilePath, 'r');
-        if ($handle === false) {
-            return ['success' => false, 'message' => 'CSVファイルを開けません'];
-        }
-
-        $headers = fgetcsv($handle);
-        if ($headers === false) {
-            fclose($handle);
-            return ['success' => false, 'message' => 'CSVヘッダーを読み込めません'];
-        }
-
-        $headers = array_filter(array_map('trim', $headers));
-        $lineNumber = 2;
-        $processedRows = 0;
-        $skippedRows = 0;
-        $errors = [];
-
-        while (($row = fgetcsv($handle)) !== false) {
-            if (in_array($lineNumber, $skipLines)) {
-                $skippedRows++;
-                $lineNumber++;
-                continue;
-            }
-
-            try {
-                if (count($row) !== count($headers)) {
-                    $skippedRows++;
-                    $errors[] = "行 {$lineNumber}: カラム数不整合 (" . count($row) . " != " . count($headers) . ")";
-                    $lineNumber++;
-                    continue;
-                }
-
-                $data = $this->convertNULL(array_combine($headers, $row));
-                $result = $processor($data, $lineNumber);
-
-                if ($result !== true) {
-                    $errors[] = "行 {$lineNumber}: " . $result;
-                }
-
-                $processedRows++;
-            } catch (\Exception $e) {
-                $errors[] = "行 {$lineNumber}: " . $e->getMessage();
-                $skippedRows++;
-            }
-
-            $lineNumber++;
-        }
-
-        fclose($handle);
-
-        return [
-            'success' => true,
-            'processed_rows' => $processedRows,
-            'skipped_rows' => $skippedRows,
-            'errors' => $errors,
-            'headers' => $headers
+            'handle' => $handle,
+            'encoding' => $encoding,
+            'message' => 'success'
         ];
     }
 }
