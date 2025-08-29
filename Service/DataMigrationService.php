@@ -202,7 +202,7 @@ class DataMigrationService
         $em->exec('DELETE FROM dtb_cart_item');
 
         // 外部キー制約エラーになるデータを消す
-        $platform = $em->getConnection()->getDatabasePlatform()->getName();
+        $platform = $this->getDatabasePlatformName($em);
         
         // PostgreSQL対応: id = 0 の処理
         if ($platform === 'postgresql') {
@@ -238,10 +238,22 @@ class DataMigrationService
         }
     }
 
+    private function getDatabasePlatformName($em)
+    {
+        // EntityManagerまたはConnectionオブジェクトかを判定
+        if (method_exists($em, 'getConnection')) {
+            // EntityManagerの場合
+            return $em->getConnection()->getDatabasePlatform()->getName();
+        } else {
+            // Connectionオブジェクトの場合
+            return $em->getDatabasePlatform()->getName();
+        }
+    }
+
     public function begin($em)
     {
         $em->beginTransaction();
-        $platform = $em->getConnection()->getDatabasePlatform()->getName();
+        $platform = $this->getDatabasePlatformName($em);
 
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
@@ -714,7 +726,7 @@ class DataMigrationService
                         $builder->execute();
                     } catch (\Exception $e) {
                         // PostgreSQLで制約エラーが発生した場合のハンドリング
-                        $platform = $em->getConnection()->getDatabasePlatform()->getName();
+                        $platform = $this->getDatabasePlatformName($em);
                         if ($platform === 'postgresql') {
                             // 個別の行でリトライまたはスキップ処理
                             $controller->addWarning($tableName . ' でバッチ挿入エラー: ' . $e->getMessage(), 'admin');
@@ -874,7 +886,7 @@ class DataMigrationService
                         $builder->execute();
                     } catch (\Exception $e) {
                         // PostgreSQLで制約エラーが発生した場合のハンドリング
-                        $platform = $em->getConnection()->getDatabasePlatform()->getName();
+                        $platform = $this->getDatabasePlatformName($em);
                         if ($platform === 'postgresql') {
                             // 個別の行でリトライまたはスキップ処理
                             $controller->addWarning($tableName . ' でバッチ挿入エラー: ' . $e->getMessage(), 'admin');
