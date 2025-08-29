@@ -519,17 +519,42 @@ class ConfigController extends AbstractController
         $tableName = ($tableName) ? $tableName : $csvName;
         $this->dataMigrationService->resetTable($em, $tableName);
 
-        if (file_exists($tmpDir . $csvName . '.csv') == false) {
+        $csvFilePath = $tmpDir . $csvName . '.csv';
+        
+        if (file_exists($csvFilePath) == false) {
             // 無視する
             return;
         }
-        if (filesize($tmpDir . $csvName . '.csv') == 0) {
+        if (filesize($csvFilePath) == 0) {
             // 無視する
             return;
         }
 
-        if (($handle = fopen($tmpDir . $csvName . '.csv', 'r')) !== false) {
-            // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
+        // CSVファイルのエンコーディング修復を試行
+        $repairResult = $this->dataMigrationService->repairCsvEncoding($csvFilePath);
+        
+        if (!$repairResult['success']) {
+            $this->addError($repairResult['message'], 'admin');
+            return;
+        }
+
+        // 修復されたファイルまたは元ファイルを使用
+        $processedCsvFile = $repairResult['repaired_file'] ?? $csvFilePath;
+        
+        // 修復メッセージを表示
+        if ($repairResult['repaired_file']) {
+            $this->addSuccess($repairResult['message'], 'admin');
+        }
+
+        // エラー行がある場合の警告
+        if (!empty($repairResult['error_lines'])) {
+            $errorCount = count($repairResult['error_lines']);
+            $this->addWarning("CSV処理中に {$errorCount} 行をスキップします: " . 
+                            implode(', ', array_slice($repairResult['error_lines'], 0, 10)), 'admin');
+        }
+
+        if (($handle = fopen($processedCsvFile, 'r')) !== false) {
+            // エンコーディング修復済みファイルを処理
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
@@ -545,8 +570,27 @@ class ConfigController extends AbstractController
             $builder->setColumns($listTableColumns);
 
             $batchSize = 20;
+            $lineNumber = 2; // ヘッダーの次から開始
+            $skipLines = $repairResult['error_lines'] ?? [];
+            $processedCount = 0;
+            $skippedCount = 0;
 
             while (($row = fgetcsv($handle)) !== false) {
+                // エラー行をスキップ
+                if (in_array($lineNumber, $skipLines)) {
+                    $skippedCount++;
+                    $lineNumber++;
+                    continue;
+                }
+
+                // カラム数チェック
+                if (count($row) !== count($key)) {
+                    $this->addWarning("行 {$lineNumber}: カラム数不整合をスキップ (" . count($row) . " != " . count($key) . ")", 'admin');
+                    $skippedCount++;
+                    $lineNumber++;
+                    continue;
+                }
+
                 $value = [];
 
                 // 1行目をkeyとした配列を作る
@@ -766,12 +810,13 @@ class ConfigController extends AbstractController
                 }
 
                 $builder->setValues($value);
+                $processedCount++;
 
-                if (($i % $batchSize) === 0) {
+                if (($processedCount % $batchSize) === 0) {
                     $builder->execute();
                 }
 
-                $i++;
+                $lineNumber++;
             }
 
             if (count($builder->getValues()) > 0) {
@@ -780,7 +825,15 @@ class ConfigController extends AbstractController
 
             fclose($handle);
 
-            return $i; // indexを返す
+            // 処理結果を報告
+            if ($processedCount > 0) {
+                $this->addSuccess("{$tableName} のデータ {$processedCount} 行を処理しました。", 'admin');
+            }
+            if ($skippedCount > 0) {
+                $this->addInfo("処理中に {$skippedCount} 行をスキップしました。", 'admin');
+            }
+
+            return $processedCount; // 処理した行数を返す
         }
     }
 
