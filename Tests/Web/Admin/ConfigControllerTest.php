@@ -4,6 +4,7 @@
 namespace Plugin\DataMigration43\Tests\Web\Admin;
 
 
+use DAMA\DoctrineTestBundle\Doctrine\DBAL\StaticDriver;
 use Eccube\Common\Constant;
 use Eccube\Entity\Customer;
 use Eccube\Entity\Order;
@@ -13,15 +14,28 @@ use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * @group integration
+ */
 class ConfigControllerTest extends AbstractAdminWebTestCase
 {
     public function setUp(): void
     {
         parent::setUp();
+        
+        // PostgreSQLでDAMA DoctrineTestBundleを無効にする
+        if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
+            StaticDriver::setKeepStaticConnections(false);
+        }
     }
 
     public function tearDown(): void
     {
+        // PostgreSQLでDAMA DoctrineTestBundleの設定をリセット
+        if ($this->entityManager && $this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
+            StaticDriver::setKeepStaticConnections(true);
+        }
+        
         parent::tearDown();
     }
 
