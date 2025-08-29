@@ -22,21 +22,6 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
 
     public function tearDown(): void
     {
-        // PostgreSQLの場合のみ、シンプルなトランザクションクリア
-        if ($this->entityManager && isset($this->entityManager)) {
-            $connection = $this->entityManager->getConnection();
-            if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
-                // シンプルにトランザクションをクリア（エラーは無視）
-                try {
-                    if ($connection->isTransactionActive()) {
-                        $connection->rollBack();
-                    }
-                } catch (\Throwable $e) {
-                    // 全てのエラーを無視
-                }
-            }
-        }
-        
         parent::tearDown();
     }
 
@@ -58,11 +43,6 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
      */
     public function testバックアップファイルをアップロードできるかテスト($v, $c, $p, $o)
     {
-        // PostgreSQLで最後のテストケース（4_1_2）の場合はスキップ
-        if ($v === '4_1_2' && $this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
-            $this->markTestSkipped('PostgreSQLでの4_1_2テストケースはトランザクションエラーのためスキップします');
-        }
-        
         $container = self::getContainer();
         $project_dir = $container->getParameter('kernel.project_dir');
 
@@ -88,48 +68,27 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             $post['config']['customer_order_only'] = 1;
         }
 
-        try {
-            $this->client->request(
-                'POST',
-                $this->generateUrl('data_migration43_admin_config'),
-                $post,
-                ['config' => ['import_file' => $file]]
-            );
-            
-            $customers = $this->entityManager->getRepository(Customer::class)->findAll();
-            self::assertEquals($c, count($customers));
-    
-            if ($p > 0) {
-                $products = $this->entityManager->getRepository(Product::class)->findAll();
-                self::assertEquals($p, count($products));
-            }
-    
-            $orders = $this->entityManager->getRepository(Order::class)->findAll();
-            self::assertEquals($o, count($orders));
-    
-            // ECCUBE_AUTH_MAGICの値を取得してアサート
-            //$eccubeConfig = $container->get('Eccube\Common\EccubeConfig');
-            //$authMagic = $eccubeConfig->get('eccube_auth_magic');
-            //self::assertEquals('dummy', $authMagic);
-        } catch (\Exception $e) {
-            // PostgreSQLの場合のシンプルなクリーンアップ
-            try {
-                $connection = $this->entityManager->getConnection();
-                if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
-                    // PostgreSQLでは全エラーを無視してシンプルにクリア
-                    try {
-                        if ($connection->isTransactionActive()) {
-                            $connection->rollBack();
-                        }
-                    } catch (\Throwable $ignored) {
-                        // 全てのエラーを無視
-                    }
-                }
-            } catch (\Throwable $ignored) {
-                // entityManagerアクセスエラーも無視
-            }
-            
-            throw $e;
+        $this->client->request(
+            'POST',
+            $this->generateUrl('data_migration43_admin_config'),
+            $post,
+            ['config' => ['import_file' => $file]]
+        );
+        
+        $customers = $this->entityManager->getRepository(Customer::class)->findAll();
+        self::assertEquals($c, count($customers));
+
+        if ($p > 0) {
+            $products = $this->entityManager->getRepository(Product::class)->findAll();
+            self::assertEquals($p, count($products));
         }
+
+        $orders = $this->entityManager->getRepository(Order::class)->findAll();
+        self::assertEquals($o, count($orders));
+
+        // ECCUBE_AUTH_MAGICの値を取得してアサート
+        //$eccubeConfig = $container->get('Eccube\Common\EccubeConfig');
+        //$authMagic = $eccubeConfig->get('eccube_auth_magic');
+        //self::assertEquals('dummy', $authMagic);
     }
 }
