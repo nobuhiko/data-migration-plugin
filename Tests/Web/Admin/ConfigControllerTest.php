@@ -82,12 +82,32 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             $post['config']['customer_order_only'] = 1;
         }
 
-        $this->client->request(
-            'POST',
-            $this->generateUrl('data_migration43_admin_config'),
-            $post,
-            ['config' => ['import_file' => $file]]
-        );
+        try {
+            $this->client->request(
+                'POST',
+                $this->generateUrl('data_migration43_admin_config'),
+                $post,
+                ['config' => ['import_file' => $file]]
+            );
+            
+            // PostgreSQLでエラーが発生した場合のデバッグ情報
+            $response = $this->client->getResponse();
+            if ($response->getStatusCode() >= 400) {
+                echo "Response Status: " . $response->getStatusCode() . "\n";
+                echo "Response Content: " . $response->getContent() . "\n";
+            }
+            
+        } catch (\Exception $e) {
+            // PostgreSQLの場合、詳細なエラー情報を表示
+            if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
+                echo "PostgreSQL Error: " . $e->getMessage() . "\n";
+                echo "Error Code: " . $e->getCode() . "\n";
+                if (method_exists($e, 'getPrevious') && $e->getPrevious()) {
+                    echo "Previous Error: " . $e->getPrevious()->getMessage() . "\n";
+                }
+            }
+            throw $e;
+        }
         
         $customers = $this->entityManager->getRepository(Customer::class)->findAll();
         self::assertEquals($c, count($customers));

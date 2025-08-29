@@ -202,16 +202,40 @@ class DataMigrationService
         $em->exec('DELETE FROM dtb_cart_item');
 
         // 外部キー制約エラーになるデータを消す
-        $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
-        $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
-        $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
+        $platform = $em->getConnection()->getDatabasePlatform()->getName();
+        
+        // PostgreSQL対応: id = 0 の処理
+        if ($platform === 'postgresql') {
+            try {
+                $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
+            } catch (\Exception $e) {
+                // PostgreSQLでエラーが発生した場合は無視
+            }
+        } else {
+            $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
+        }
+        
+        // PostgreSQL対応: NOT IN を NOT EXISTS に変更
+        if ($platform === 'postgresql') {
+            $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id1)');
+            $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id2)');
+        } else {
+            $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
+            $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
+        }
 
-        $em->exec('delete from dtb_product_tag where id in (
-                        select id from (select t1.id from dtb_product_tag t1 left join dtb_tag t2 on t1.tag_id = t2.id where t2.id is null) as tmp
-                    );');
-        $em->exec('delete from dtb_product_tag where id in (
-                        select id from (select t1.id from dtb_product_tag t1 left join dtb_product t2 on t1.product_id = t2.id where t2.id is null) as tmp
-                    );');
+        // PostgreSQL対応: サブクエリの書き方を変更
+        if ($platform === 'postgresql') {
+            $em->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_tag WHERE dtb_tag.id = dtb_product_tag.tag_id)');
+            $em->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_product WHERE dtb_product.id = dtb_product_tag.product_id)');
+        } else {
+            $em->exec('delete from dtb_product_tag where id in (
+                            select id from (select t1.id from dtb_product_tag t1 left join dtb_tag t2 on t1.tag_id = t2.id where t2.id is null) as tmp
+                        );');
+            $em->exec('delete from dtb_product_tag where id in (
+                            select id from (select t1.id from dtb_product_tag t1 left join dtb_product t2 on t1.product_id = t2.id where t2.id is null) as tmp
+                        );');
+        }
     }
 
     public function begin($em)
