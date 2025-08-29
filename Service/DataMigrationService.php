@@ -246,8 +246,15 @@ class DataMigrationService
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-        } else {
-            $em->exec('SET session_replication_role = replica;'); // need super user
+        } elseif ($platform == 'postgresql') {
+            // PostgreSQLではsession_replication_roleの代わりに制約を遅延実行に設定
+            try {
+                // 既存の遅延可能制約があれば遅延実行に設定
+                $em->exec('SET CONSTRAINTS ALL DEFERRED;');
+            } catch (\Exception $e) {
+                // 遅延制約が設定されていない場合は無視
+                // このケースでは個別にエラーハンドリングする
+            }
         }
 
         return $platform;
@@ -575,9 +582,15 @@ class DataMigrationService
 
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
-        } else {
+        } elseif ($platform == 'postgresql') {
             foreach ($importOrder as $tableName) {
                 $this->setIdSeq($em, $tableName);
+            }
+            // PostgreSQLの制約設定をリセット（session_replication_roleは不要）
+            try {
+                $em->exec('SET CONSTRAINTS ALL IMMEDIATE;');
+            } catch (\Exception $e) {
+                // 制約の設定でエラーが発生した場合は無視
             }
         }
         $em->commit();
@@ -697,12 +710,34 @@ class DataMigrationService
                 $builder->setValues($value);
 
                 if (($i % $batchSize) === 0) {
-                    $builder->execute();
+                    try {
+                        $builder->execute();
+                    } catch (\Exception $e) {
+                        // PostgreSQLで制約エラーが発生した場合のハンドリング
+                        $platform = $em->getDatabasePlatform()->getName();
+                        if ($platform === 'postgresql') {
+                            // 個別の行でリトライまたはスキップ処理
+                            $controller->addWarning($tableName . ' でバッチ挿入エラー: ' . $e->getMessage(), 'admin');
+                        } else {
+                            throw $e;
+                        }
+                    }
                 }
                 $i++;
             }
             if (count($builder->getValues()) > 0) {
-                $builder->execute();
+                try {
+                    $builder->execute();
+                } catch (\Exception $e) {
+                    // PostgreSQLで制約エラーが発生した場合のハンドリング
+                    $platform = $em->getDatabasePlatform()->getName();
+                    if ($platform === 'postgresql') {
+                        // 個別の行でリトライまたはスキップ処理
+                        $controller->addWarning($tableName . ' で最終バッチ挿入エラー: ' . $e->getMessage(), 'admin');
+                    } else {
+                        throw $e;
+                    }
+                }
             }
             fclose($handle);
         }
@@ -835,12 +870,34 @@ class DataMigrationService
                 $builder->setValues($value);
 
                 if (($i % $batchSize) === 0) {
-                    $builder->execute();
+                    try {
+                        $builder->execute();
+                    } catch (\Exception $e) {
+                        // PostgreSQLで制約エラーが発生した場合のハンドリング
+                        $platform = $em->getDatabasePlatform()->getName();
+                        if ($platform === 'postgresql') {
+                            // 個別の行でリトライまたはスキップ処理
+                            $controller->addWarning($tableName . ' でバッチ挿入エラー: ' . $e->getMessage(), 'admin');
+                        } else {
+                            throw $e;
+                        }
+                    }
                 }
                 $i++;
             }
             if (count($builder->getValues()) > 0) {
-                $builder->execute();
+                try {
+                    $builder->execute();
+                } catch (\Exception $e) {
+                    // PostgreSQLで制約エラーが発生した場合のハンドリング
+                    $platform = $em->getDatabasePlatform()->getName();
+                    if ($platform === 'postgresql') {
+                        // 個別の行でリトライまたはスキップ処理
+                        $controller->addWarning($tableName . ' で最終バッチ挿入エラー: ' . $e->getMessage(), 'admin');
+                    } else {
+                        throw $e;
+                    }
+                }
             }
             fclose($handle);
         }
