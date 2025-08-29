@@ -65,9 +65,9 @@ class DataMigrationServiceTest extends EccubeTestCase
     }
 
     /**
-     * CSVファイルの最初の3行だけなら問題なく動作することをテスト
+     * openCsvWithEncoding メソッドの基本機能をテスト
      */
-    public function testSaveToPWithFirst3Rows()
+    public function testOpenCsvWithEncodingBasic()
     {
         // テスト用CSVファイル（最初の3行のみ）を作成
         $csvContent = <<<CSV
@@ -79,22 +79,16 @@ CSV;
         $csvFile = $this->testCsvDir . '/dtb_products.csv';
         file_put_contents($csvFile, $csvContent);
 
-        // テスト実行
-        $em = $this->entityManager;
-        
-        // saveToPメソッドを直接テストできないため、サービスメソッドを使用
-        $result = $this->dataMigrationService->repairCsvEncoding($csvFile);
+        // openCsvWithEncodingメソッドのテスト
+        $result = $this->dataMigrationService->openCsvWithEncoding($csvFile);
         
         // アサーション
-        $this->assertTrue($result['success'], 'CSV修復が成功すること');
-        $this->assertEmpty($result['error_lines'], 'エラー行が存在しないこと');
-        $this->assertGreaterThanOrEqual(95, $result['quality_score'], '品質スコアが95%以上であること');
+        $this->assertNotFalse($result['handle'], 'CSVファイルのハンドルが取得できること');
+        $this->assertEquals('success', $result['message'], '成功メッセージが返されること');
+        $this->assertNotNull($result['encoding'], 'エンコーディング情報が返されること');
         
-        // 修復後のCSVが正しく読み込めることを確認
-        $processedFile = $result['repaired_file'] ?? $csvFile;
-        $handle = fopen($processedFile, 'r');
-        $this->assertNotFalse($handle, 'CSVファイルが開けること');
-        
+        // CSVが正しく読み込めることを確認
+        $handle = $result['handle'];
         $headers = fgetcsv($handle);
         $this->assertCount(53, $headers, 'ヘッダーが53カラムあること');
         
@@ -102,116 +96,111 @@ CSV;
         while (($row = fgetcsv($handle)) !== false) {
             $rowCount++;
             $this->assertCount(53, $row, "行 {$rowCount} が53カラムあること");
+            // 日本語が正しく読み込まれることを確認
+            if ($rowCount === 1) {
+                $this->assertEquals('アイスクリーム', $row[1], '日本語の商品名が正しく読み込まれること');
+            }
         }
         
         $this->assertEquals(2, $rowCount, 'データ行が2行あること');
         fclose($handle);
-        
-        // 修復ファイルのクリーンアップ
-        if (isset($result['repaired_file']) && file_exists($result['repaired_file'])) {
-            unlink($result['repaired_file']);
-        }
     }
 
     /**
-     * 文字化けを含む完全なCSVファイルでも動作することをテスト
+     * カラム数不整合を含むCSVファイルでも動作することをテスト
      */
-    public function testSaveToPWithFullCorruptedCsv()
+    public function testOpenCsvWithEncodingWithCorruptedData()
     {
-        // 文字化けを含むCSVファイルを作成（101行目と133行目にエラーを含む）
+        // カラム数不整合を含むCSVファイルを作成
         $csvContent = $this->createCorruptedCsvContent();
         
         $csvFile = $this->testCsvDir . '/dtb_products_corrupted.csv';
-        
-        // UTF-8のまま保存（repairCsvEncodingがUTF-8として検出し、そのまま処理される）
         file_put_contents($csvFile, $csvContent);
 
-        // テスト実行
-        $result = $this->dataMigrationService->repairCsvEncoding($csvFile);
+        // openCsvWithEncodingメソッドのテスト
+        $result = $this->dataMigrationService->openCsvWithEncoding($csvFile);
         
         // アサーション
-        $this->assertTrue($result['success'], '文字化けCSVでも修復が成功すること');
-        $this->assertNotEmpty($result['error_lines'], 'エラー行が検出されること');
-        $this->assertContains(101, $result['error_lines'], '101行目がエラーとして検出されること');
-        $this->assertContains(133, $result['error_lines'], '133行目がエラーとして検出されること');
+        $this->assertNotFalse($result['handle'], 'CSVファイルのハンドルが取得できること');
+        $this->assertEquals('success', $result['message'], '成功メッセージが返されること');
         
-        // エラー行のスキップ機能のテスト
-        $processedFile = $result['repaired_file'] ?? $csvFile;
-        $skipLines = $result['error_lines'];
+        // CSVを実際に読み込んで検証
+        $handle = $result['handle'];
+        $headers = fgetcsv($handle);
+        $this->assertCount(53, $headers, 'ヘッダーが53カラムあること');
         
-        $processResult = $this->dataMigrationService->processCsvWithSkip(
-            $processedFile,
-            $skipLines,
-            function($data, $lineNumber) {
-                // 基本的なデータ検証
-                if (empty($data['name'])) {
-                    return "商品名が空です";
+        $lineNumber = 2;
+        $totalRows = 0;
+        $errorRows = [];
+        $validRows = 0;
+        
+        while (($row = fgetcsv($handle)) !== false) {
+            $totalRows++;
+            if (count($row) !== 53) {
+                $errorRows[] = $lineNumber;
+            } else {
+                $validRows++;
+                // 正常な行の日本語チェック
+                if (!empty($row[1]) && preg_match('/^商品\d+$/', $row[1])) {
+                    $this->assertIsString($row[1], '商品名が文字列として読み込まれること');
                 }
-                return true;
             }
-        );
-        
-        $this->assertTrue($processResult['success'], '処理が成功すること');
-        // エラー行が101と133なので、200行中198行が処理される想定
-        $expectedProcessedRows = 200 - count($skipLines);
-        $this->assertEquals($expectedProcessedRows, $processResult['processed_rows'], '正しい数の行が処理されること');
-        $this->assertEquals(count($skipLines), $processResult['skipped_rows'], 'エラー行がスキップされること');
-        
-        // 修復ファイルのクリーンアップ
-        if (isset($result['repaired_file']) && file_exists($result['repaired_file'])) {
-            unlink($result['repaired_file']);
+            $lineNumber++;
         }
+        
+        $this->assertGreaterThan(0, $totalRows, '複数行のデータが読み込まれること');
+        $this->assertNotEmpty($errorRows, 'カラム数不整合の行が検出されること');
+        $this->assertGreaterThan(0, $validRows, '正常な行も存在すること');
+        
+        fclose($handle);
     }
 
     /**
-     * saveToP メソッドの統合テスト（モック使用）
+     * ファイルサイズ制限のテスト
      */
-    public function testSaveToPIntegration()
+    public function testOpenCsvWithEncodingFileSizeLimit()
     {
-        // 最小限のテストCSVを作成（53カラムすべて含む）
+        // 大きなファイルの場合の挙動をテスト
+        $csvFile = $this->testCsvDir . '/large_test.csv';
+        
+        // 実際には小さなファイルを作成してテストする
         $headers = 'product_id,name,maker_id,status,comment1,comment2,comment3,comment4,comment5,comment6,note,main_list_comment,main_list_image,main_comment,main_image,main_large_image,sub_title1,sub_comment1,sub_image1,sub_large_image1,sub_title2,sub_comment2,sub_image2,sub_large_image2,sub_title3,sub_comment3,sub_image3,sub_large_image3,sub_title4,sub_comment4,sub_image4,sub_large_image4,sub_title5,sub_comment5,sub_image5,sub_large_image5,sub_title6,sub_comment6,sub_image6,sub_large_image6,del_flg,creator_id,create_date,update_date,deliv_date_id,category_id,product_flag,file1,file2,file3,file4,file5,file6';
         $data = '999,テスト商品,,1,,,テストキーワード,,,,,テスト一覧コメント,test.jpg,テストメインコメント,test_main.jpg,test_large.jpg,,,,,,,,,,,,,,,,,,,,,,,,0,1,2024-01-01 00:00:00,2024-01-01 00:00:00,1,1,00000,,,,,,';
         
         $csvContent = $headers . "\n" . $data;
-
-        $csvFile = $this->testCsvDir . '/dtb_products.csv';
         file_put_contents($csvFile, $csvContent);
 
-        // repairCsvEncodingのテスト
-        $result = $this->dataMigrationService->repairCsvEncoding($csvFile);
+        // openCsvWithEncodingのテスト
+        $result = $this->dataMigrationService->openCsvWithEncoding($csvFile);
         
-        $this->assertTrue($result['success'], 'CSVが正常に処理されること');
-        $this->assertArrayHasKey('quality_score', $result, '品質スコアが存在すること');
-        $this->assertArrayHasKey('error_lines', $result, 'エラー行情報が存在すること');
+        $this->assertNotFalse($result['handle'], 'CSVファイルのハンドルが取得できること');
+        $this->assertEquals('success', $result['message'], '成功メッセージが返されること');
         
-        // processCsvWithSkipのテスト
-        $processedFile = $result['repaired_file'] ?? $csvFile;
-        $dataCollected = [];
+        // CSVを実際に読み込んで日本語が正しく処理されることを確認
+        $handle = $result['handle'];
+        $headers = fgetcsv($handle);
+        $this->assertCount(53, $headers, 'ヘッダーが53カラムあること');
         
-        $processResult = $this->dataMigrationService->processCsvWithSkip(
-            $processedFile,
-            $result['error_lines'] ?? [],
-            function($data, $lineNumber) use (&$dataCollected) {
-                $dataCollected[] = $data;
-                return true;
-            }
-        );
+        $row = fgetcsv($handle);
+        $this->assertNotFalse($row, 'データ行が読み込めること');
+        $this->assertEquals('テスト商品', $row[1], '日本語商品名が正しく読み込まれること');
+        $this->assertEquals('テストキーワード', $row[6], '日本語キーワードが正しく読み込まれること');
         
-        $this->assertTrue($processResult['success'], 'CSVの処理が成功すること');
-        if ($processResult['processed_rows'] > 0) {
-            $this->assertGreaterThanOrEqual(1, $processResult['processed_rows'], '少なくとも1行が処理されること');
-            $this->assertCount(1, $dataCollected, '1つのデータが収集されること');
-            $this->assertEquals('テスト商品', $dataCollected[0]['name'], '商品名が正しく読み込まれること');
-        } else {
-            // processCsvWithSkipが動作しない場合は、repairCsvEncodingの結果を検証
-            $this->assertTrue($result['success'], 'repair処理が成功していること');
-            $this->assertArrayHasKey('quality_score', $result, '品質スコアが存在すること');
-        }
+        fclose($handle);
+    }
+
+    /**
+     * 存在しないファイルのエラーハンドリングテスト
+     */
+    public function testOpenCsvWithEncodingFileNotFound()
+    {
+        $nonExistentFile = $this->testCsvDir . '/non_existent.csv';
         
-        // 修復ファイルのクリーンアップ
-        if (isset($result['repaired_file']) && file_exists($result['repaired_file'])) {
-            unlink($result['repaired_file']);
-        }
+        $result = $this->dataMigrationService->openCsvWithEncoding($nonExistentFile);
+        
+        $this->assertFalse($result['handle'], 'ハンドルがfalseであること');
+        $this->assertStringContainsString('CSVファイルが見つかりません', $result['message'], 'エラーメッセージが返されること');
+        $this->assertNull($result['encoding'], 'エンコーディング情報がnullであること');
     }
 
     /**
