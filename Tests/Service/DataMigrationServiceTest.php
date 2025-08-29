@@ -28,11 +28,6 @@ class DataMigrationServiceTest extends EccubeTestCase
      */
     private $filesystem;
 
-    /**
-     * @var ConfigController
-     */
-    private $configController;
-
     public function setUp(): void
     {
         parent::setUp();
@@ -43,15 +38,6 @@ class DataMigrationServiceTest extends EccubeTestCase
         // テスト用ディレクトリの作成
         $this->testCsvDir = sys_get_temp_dir() . '/datamigration_test_' . uniqid();
         $this->filesystem->mkdir($this->testCsvDir);
-        
-        // ConfigControllerのモックを作成
-        $this->configController = $this->createMock(ConfigController::class);
-        
-        // プライベートメソッドへのアクセスを可能にする
-        $reflection = new \ReflectionClass($this->configController);
-        $property = $reflection->getProperty('dataMigrationService');
-        $property->setAccessible(true);
-        $property->setValue($this->configController, $this->dataMigrationService);
     }
 
     public function tearDown(): void
@@ -59,6 +45,18 @@ class DataMigrationServiceTest extends EccubeTestCase
         // テスト用ディレクトリの削除
         if ($this->filesystem->exists($this->testCsvDir)) {
             $this->filesystem->remove($this->testCsvDir);
+        }
+        
+        // PostgreSQLの場合、トランザクションエラーをクリア
+        $em = $this->entityManager;
+        if ($em && $em->getConnection()->isTransactionActive()) {
+            while ($em->getConnection()->getTransactionNestingLevel() > 0) {
+                try {
+                    $em->getConnection()->rollBack();
+                } catch (\Exception $e) {
+                    // エラーを無視
+                }
+            }
         }
         
         parent::tearDown();
