@@ -215,12 +215,36 @@ CSV;
         
         $rows = [$headers];
         
-        // 正常な行の雛形（53カラム）
-        $normalRowTemplate = '%d,商品%d,,1,,,,,,,,,test%d.jpg,,,test_main%d.jpg,,,,,,,,,,,,,,,,,,,,,,,,,,,0,1,"2024-01-01 00:00:00","2024-01-01 00:00:00",1,1,00000,,,,,,';
-        
-        // 正常な行を99行追加
+        // 正常な行を53カラムで構成（ヘッダーと同じカラム数）
         for ($i = 1; $i <= 99; $i++) {
-            $rows[] = sprintf($normalRowTemplate, $i, $i, $i, $i);
+            $normalRow = [
+                $i, // 1. product_id
+                "商品{$i}", // 2. name
+                '', // 3. maker_id
+                1, // 4. status
+                '', '', '', '', '', '', // 5-10. comment1-6
+                '', // 11. note
+                '', // 12. main_list_comment
+                "test{$i}.jpg", // 13. main_list_image
+                '', // 14. main_comment
+                "test_main{$i}.jpg", // 15. main_image
+                '', // 16. main_large_image
+                '', '', '', '', // 17-20. sub_title1, sub_comment1, sub_image1, sub_large_image1
+                '', '', '', '', // 21-24. sub_title2, sub_comment2, sub_image2, sub_large_image2
+                '', '', '', '', // 25-28. sub_title3, sub_comment3, sub_image3, sub_large_image3
+                '', '', '', '', // 29-32. sub_title4, sub_comment4, sub_image4, sub_large_image4
+                '', '', '', '', // 33-36. sub_title5, sub_comment5, sub_image5, sub_large_image5
+                '', '', '', '', // 37-40. sub_title6, sub_comment6, sub_image6, sub_large_image6
+                0, // 41. del_flg
+                1, // 42. creator_id
+                '2024-01-01 00:00:00', // 43. create_date
+                '2024-01-01 00:00:00', // 44. update_date
+                1, // 45. deliv_date_id
+                1, // 46. category_id
+                '00000', // 47. product_flag
+                '', '', '', '', '', '' // 48-53. file1-6
+            ];
+            $rows[] = implode(',', $normalRow);
         }
         
         // 100行目（101行目として処理される）- カラム数不足のエラー行（24カラム）
@@ -228,7 +252,34 @@ CSV;
         
         // 正常な行を31行追加
         for ($i = 101; $i <= 131; $i++) {
-            $rows[] = sprintf($normalRowTemplate, $i, $i, $i, $i);
+            $normalRow = [
+                $i, // 1. product_id
+                "商品{$i}", // 2. name
+                '', // 3. maker_id
+                1, // 4. status
+                '', '', '', '', '', '', // 5-10. comment1-6
+                '', // 11. note
+                '', // 12. main_list_comment
+                "test{$i}.jpg", // 13. main_list_image
+                '', // 14. main_comment
+                "test_main{$i}.jpg", // 15. main_image
+                '', // 16. main_large_image
+                '', '', '', '', // 17-20. sub_title1, sub_comment1, sub_image1, sub_large_image1
+                '', '', '', '', // 21-24. sub_title2, sub_comment2, sub_image2, sub_large_image2
+                '', '', '', '', // 25-28. sub_title3, sub_comment3, sub_image3, sub_large_image3
+                '', '', '', '', // 29-32. sub_title4, sub_comment4, sub_image4, sub_large_image4
+                '', '', '', '', // 33-36. sub_title5, sub_comment5, sub_image5, sub_large_image5
+                '', '', '', '', // 37-40. sub_title6, sub_comment6, sub_image6, sub_large_image6
+                0, // 41. del_flg
+                1, // 42. creator_id
+                '2024-01-01 00:00:00', // 43. create_date
+                '2024-01-01 00:00:00', // 44. update_date
+                1, // 45. deliv_date_id
+                1, // 46. category_id
+                '00000', // 47. product_flag
+                '', '', '', '', '', '' // 48-53. file1-6
+            ];
+            $rows[] = implode(',', $normalRow);
         }
         
         // 132行目（133行目として処理される）- カラム数不足のエラー行（25カラム）
@@ -236,7 +287,34 @@ CSV;
         
         // 残りの正常な行を追加
         for ($i = 133; $i <= 200; $i++) {
-            $rows[] = sprintf($normalRowTemplate, $i, $i, $i, $i);
+            $normalRow = [
+                $i, // 1. product_id
+                "商品{$i}", // 2. name
+                '', // 3. maker_id
+                1, // 4. status
+                '', '', '', '', '', '', // 5-10. comment1-6
+                '', // 11. note
+                '', // 12. main_list_comment
+                "test{$i}.jpg", // 13. main_list_image
+                '', // 14. main_comment
+                "test_main{$i}.jpg", // 15. main_image
+                '', // 16. main_large_image
+                '', '', '', '', // 17-20. sub_title1, sub_comment1, sub_image1, sub_large_image1
+                '', '', '', '', // 21-24. sub_title2, sub_comment2, sub_image2, sub_large_image2
+                '', '', '', '', // 25-28. sub_title3, sub_comment3, sub_image3, sub_large_image3
+                '', '', '', '', // 29-32. sub_title4, sub_comment4, sub_image4, sub_large_image4
+                '', '', '', '', // 33-36. sub_title5, sub_comment5, sub_image5, sub_large_image5
+                '', '', '', '', // 37-40. sub_title6, sub_comment6, sub_image6, sub_large_image6
+                0, // 41. del_flg
+                1, // 42. creator_id
+                '2024-01-01 00:00:00', // 43. create_date
+                '2024-01-01 00:00:00', // 44. update_date
+                1, // 45. deliv_date_id
+                1, // 46. category_id
+                '00000', // 47. product_flag
+                '', '', '', '', '', '' // 48-53. file1-6
+            ];
+            $rows[] = implode(',', $normalRow);
         }
         
         return implode("\n", $rows);
