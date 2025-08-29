@@ -150,6 +150,19 @@ jobs:
         run: |
           rm -rf var/cache
           ./vendor/bin/phpunit app/Plugin/${PLUGIN_CODE}/Tests
+          
+      - name: Run DataMigrationServiceTest specifically
+        env:
+          APP_ENV: "test"
+          APP_DEBUG: 0
+          DATABASE_URL: ${{ matrix.database_url }}
+          DATABASE_SERVER_VERSION: ${{ matrix.database_server_version }}
+          DATABASE_CHARSET: ${{ matrix.database_charset }}
+          PLUGIN_CODE: ${{ matrix.plugin_code }}
+        working-directory: "ec-cube"
+        run: |
+          echo "Running DataMigrationServiceTest specifically..."
+          ./vendor/bin/phpunit app/Plugin/${PLUGIN_CODE}/Tests/Service/DataMigrationServiceTest.php
 
       - name: Disable Plugin
         working-directory: "ec-cube"
