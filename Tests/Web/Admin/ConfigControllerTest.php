@@ -19,25 +19,22 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
     {
         parent::setUp();
         
-        // PostgreSQLの場合、既存のトランザクションをクリアして新しく開始
+        // PostgreSQLの場合、トランザクション状態を安全にクリア
         if ($this->entityManager) {
             $connection = $this->entityManager->getConnection();
             if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
-                // 既存のトランザクションがある場合はクリア
-                while ($connection->isTransactionActive()) {
-                    try {
+                // 安全にトランザクションをクリア
+                try {
+                    while ($connection->getTransactionNestingLevel() > 0 && $connection->isTransactionActive()) {
                         $connection->rollBack();
-                    } catch (\Exception $e) {
-                        break;
                     }
-                }
-                
-                // 新しいトランザクションを開始
-                if (!$connection->isTransactionActive()) {
+                } catch (\Exception $e) {
+                    // PostgreSQLでエラーが発生した場合、接続をリセット
                     try {
-                        $connection->beginTransaction();
-                    } catch (\Exception $e) {
-                        // 開始に失敗した場合は無視
+                        $connection->close();
+                        $connection->connect();
+                    } catch (\Exception $e2) {
+                        // 接続リセットに失敗した場合は無視
                     }
                 }
             }
@@ -46,16 +43,21 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
 
     public function tearDown(): void
     {
-        // PostgreSQLの場合、トランザクションエラーをクリア
+        // PostgreSQLの場合、トランザクション状態を安全にクリア
         if ($this->entityManager) {
             $connection = $this->entityManager->getConnection();
             if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
-                while ($connection->isTransactionActive()) {
-                    try {
+                try {
+                    // ネスティングレベルとアクティブ状態の両方をチェック
+                    while ($connection->getTransactionNestingLevel() > 0 && $connection->isTransactionActive()) {
                         $connection->rollBack();
-                    } catch (\Exception $e) {
-                        // エラーを無視して続行
-                        break;
+                    }
+                } catch (\Exception $e) {
+                    // PostgreSQLエラーの場合は接続をクリア
+                    try {
+                        $connection->close();
+                    } catch (\Exception $e2) {
+                        // 無視
                     }
                 }
             }
@@ -131,33 +133,36 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             //$authMagic = $eccubeConfig->get('eccube_auth_magic');
             //self::assertEquals('dummy', $authMagic);
         } catch (\Exception $e) {
-            // エラーが発生した場合は、トランザクションをリセットしてから例外を再スローする
+            // エラーが発生した場合は、トランザクションを安全にクリア
             $connection = $this->entityManager->getConnection();
-            if ($connection->isTransactionActive()) {
+            
+            // PostgreSQL特有の処理
+            if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
                 try {
-                    $connection->rollBack();
+                    // ネスティングレベルとアクティブ状態の両方をチェック
+                    while ($connection->getTransactionNestingLevel() > 0 && $connection->isTransactionActive()) {
+                        $connection->rollBack();
+                    }
                 } catch (\Exception $rollbackException) {
-                    // PostgreSQLの場合はROLLBACKも失敗する可能性がある
-                }
-                
-                // PostgreSQLの場合は新しいトランザクションを開始する前に接続をリセット
-                if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
-                    // 完全にトランザクションをクリアする
-                    while ($connection->getTransactionNestingLevel() > 0) {
-                        try {
-                            $connection->rollBack();
-                        } catch (\Exception $e2) {
-                            break;
-                        }
+                    // PostgreSQLエラーの場合は接続をリセット
+                    try {
+                        $connection->close();
+                        $connection->connect();
+                    } catch (\Exception $reconnectException) {
+                        // 再接続に失敗した場合は無視
                     }
                 }
-                
-                try {
-                    $connection->beginTransaction();
-                } catch (\Exception $beginException) {
-                    // トランザクション開始に失敗した場合は無視
+            } else {
+                // 他のDBの場合の通常処理
+                if ($connection->isTransactionActive()) {
+                    try {
+                        $connection->rollBack();
+                    } catch (\Exception $rollbackException) {
+                        // ROLLBACKエラーは無視
+                    }
                 }
             }
+            
             throw $e;
         }
     }
