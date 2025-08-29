@@ -23,16 +23,54 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
     {
         parent::setUp();
         
-        // PostgreSQLでDAMA DoctrineTestBundleを無効にする
+        // PostgreSQLの場合、より積極的なトランザクション管理
         if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
             StaticDriver::setKeepStaticConnections(false);
+            
+            // 既存のトランザクションを完全にクリア
+            $connection = $this->entityManager->getConnection();
+            try {
+                while ($connection->isTransactionActive()) {
+                    $connection->rollBack();
+                }
+                // 新しいトランザクションを開始
+                if (!$connection->isTransactionActive()) {
+                    $connection->beginTransaction();
+                }
+            } catch (\Exception $e) {
+                // エラーは無視
+            }
         }
     }
 
     public function tearDown(): void
     {
-        // PostgreSQLでDAMA DoctrineTestBundleの設定をリセット
+        // PostgreSQLでの完全なクリーンアップ
         if ($this->entityManager && $this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
+            $connection = $this->entityManager->getConnection();
+            try {
+                // トランザクションが中断状態の場合は完全にリセット
+                if ($connection->isTransactionActive()) {
+                    // 強制的にロールバック
+                    while ($connection->getTransactionNestingLevel() > 0) {
+                        try {
+                            $connection->rollBack();
+                        } catch (\Exception $e) {
+                            break; // これ以上ロールバックできない
+                        }
+                    }
+                }
+                
+                // 接続をリセット
+                if ($connection->isTransactionActive()) {
+                    $connection->close();
+                    $connection->connect();
+                }
+                
+            } catch (\Exception $e) {
+                // 全てのエラーを無視
+            }
+            
             StaticDriver::setKeepStaticConnections(true);
         }
         
@@ -98,12 +136,26 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             }
             
         } catch (\Exception $e) {
-            // PostgreSQLの場合、詳細なエラー情報を表示
+            // PostgreSQLの場合、トランザクション回復を試行
             if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
                 echo "PostgreSQL Error: " . $e->getMessage() . "\n";
                 echo "Error Code: " . $e->getCode() . "\n";
-                if (method_exists($e, 'getPrevious') && $e->getPrevious()) {
-                    echo "Previous Error: " . $e->getPrevious()->getMessage() . "\n";
+                
+                // トランザクション回復を試行
+                $connection = $this->entityManager->getConnection();
+                try {
+                    // 完全にトランザクションをクリア
+                    while ($connection->isTransactionActive()) {
+                        $connection->rollBack();
+                    }
+                    
+                    // 接続をリセット
+                    $connection->close();
+                    $connection->connect();
+                    
+                    echo "PostgreSQL Transaction recovered\n";
+                } catch (\Exception $recoveryException) {
+                    echo "PostgreSQL Recovery failed: " . $recoveryException->getMessage() . "\n";
                 }
             }
             throw $e;

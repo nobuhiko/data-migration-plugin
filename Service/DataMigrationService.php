@@ -205,20 +205,31 @@ class DataMigrationService
         $platform = $this->getDatabasePlatformName($em);
         
         // PostgreSQL対応: id = 0 の処理
-        if ($platform === 'postgresql') {
-            try {
-                $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
-            } catch (\Exception $e) {
-                // PostgreSQLでエラーが発生した場合は無視
-            }
-        } else {
+        try {
             $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
+        } catch (\Exception $e) {
+            if ($platform === 'postgresql') {
+                // PostgreSQLでトランザクション回復を試行
+                if ($this->recoverPostgreSQLTransaction($em, $e)) {
+                    // 回復成功後、再試行はしない（データが存在しない可能性）
+                } else {
+                    throw $e; // 回復に失敗した場合は例外を再スロー
+                }
+            } else {
+                throw $e; // PostgreSQL以外では例外を再スロー
+            }
         }
         
         // PostgreSQL対応: NOT IN を NOT EXISTS に変更
         if ($platform === 'postgresql') {
-            $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id1)');
-            $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id2)');
+            try {
+                $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id1)');
+                $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id2)');
+            } catch (\Exception $e) {
+                if (!$this->recoverPostgreSQLTransaction($em, $e)) {
+                    throw $e;
+                }
+            }
         } else {
             $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
             $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
@@ -226,8 +237,14 @@ class DataMigrationService
 
         // PostgreSQL対応: サブクエリの書き方を変更
         if ($platform === 'postgresql') {
-            $em->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_tag WHERE dtb_tag.id = dtb_product_tag.tag_id)');
-            $em->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_product WHERE dtb_product.id = dtb_product_tag.product_id)');
+            try {
+                $em->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_tag WHERE dtb_tag.id = dtb_product_tag.tag_id)');
+                $em->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_product WHERE dtb_product.id = dtb_product_tag.product_id)');
+            } catch (\Exception $e) {
+                if (!$this->recoverPostgreSQLTransaction($em, $e)) {
+                    throw $e;
+                }
+            }
         } else {
             $em->exec('delete from dtb_product_tag where id in (
                             select id from (select t1.id from dtb_product_tag t1 left join dtb_tag t2 on t1.tag_id = t2.id where t2.id is null) as tmp
@@ -247,6 +264,29 @@ class DataMigrationService
         } else {
             // Connectionオブジェクトの場合
             return $em->getDatabasePlatform()->getName();
+        }
+    }
+
+    private function recoverPostgreSQLTransaction($em, $e)
+    {
+        if ($this->getDatabasePlatformName($em) !== 'postgresql') {
+            return false;
+        }
+        
+        // PostgreSQLでトランザクションが中断された場合の回復処理
+        try {
+            // 現在のトランザクションを完全にロールバック
+            while ($em->isTransactionActive()) {
+                $em->rollBack();
+            }
+            
+            // 新しいトランザクションを開始
+            $em->beginTransaction();
+            
+            return true;
+        } catch (\Exception $recoveryException) {
+            // 回復に失敗した場合
+            return false;
         }
     }
 
@@ -728,8 +768,15 @@ class DataMigrationService
                         // PostgreSQLで制約エラーが発生した場合のハンドリング
                         $platform = $this->getDatabasePlatformName($em);
                         if ($platform === 'postgresql') {
-                            // 個別の行でリトライまたはスキップ処理
-                            $controller->addWarning($tableName . ' でバッチ挿入エラー: ' . $e->getMessage(), 'admin');
+                            // PostgreSQLトランザクション回復を試行
+                            if ($this->recoverPostgreSQLTransaction($em, $e)) {
+                                $controller->addWarning($tableName . ' でバッチ挿入エラー（回復済み）: ' . $e->getMessage(), 'admin');
+                                // 新しいBuilderを作成（古いBuilderは使用不可）
+                                $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
+                            } else {
+                                $controller->addError($tableName . ' でバッチ挿入回復不可能エラー: ' . $e->getMessage(), 'admin');
+                                throw $e;
+                            }
                         } else {
                             throw $e;
                         }
@@ -888,8 +935,15 @@ class DataMigrationService
                         // PostgreSQLで制約エラーが発生した場合のハンドリング
                         $platform = $this->getDatabasePlatformName($em);
                         if ($platform === 'postgresql') {
-                            // 個別の行でリトライまたはスキップ処理
-                            $controller->addWarning($tableName . ' でバッチ挿入エラー: ' . $e->getMessage(), 'admin');
+                            // PostgreSQLトランザクション回復を試行
+                            if ($this->recoverPostgreSQLTransaction($em, $e)) {
+                                $controller->addWarning($tableName . ' でバッチ挿入エラー（回復済み）: ' . $e->getMessage(), 'admin');
+                                // 新しいBuilderを作成（古いBuilderは使用不可）
+                                $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
+                            } else {
+                                $controller->addError($tableName . ' でバッチ挿入回復不可能エラー: ' . $e->getMessage(), 'admin');
+                                throw $e;
+                            }
                         } else {
                             throw $e;
                         }
