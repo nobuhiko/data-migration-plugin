@@ -241,7 +241,7 @@ class DataMigrationService
     public function begin($em)
     {
         $em->beginTransaction();
-        $platform = $em->getDatabasePlatform()->getName();
+        $platform = $em->getConnection()->getDatabasePlatform()->getName();
 
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
@@ -714,7 +714,7 @@ class DataMigrationService
                         $builder->execute();
                     } catch (\Exception $e) {
                         // PostgreSQLで制約エラーが発生した場合のハンドリング
-                        $platform = $em->getDatabasePlatform()->getName();
+                        $platform = $em->getConnection()->getDatabasePlatform()->getName();
                         if ($platform === 'postgresql') {
                             // 個別の行でリトライまたはスキップ処理
                             $controller->addWarning($tableName . ' でバッチ挿入エラー: ' . $e->getMessage(), 'admin');
@@ -874,7 +874,7 @@ class DataMigrationService
                         $builder->execute();
                     } catch (\Exception $e) {
                         // PostgreSQLで制約エラーが発生した場合のハンドリング
-                        $platform = $em->getDatabasePlatform()->getName();
+                        $platform = $em->getConnection()->getDatabasePlatform()->getName();
                         if ($platform === 'postgresql') {
                             // 個別の行でリトライまたはスキップ処理
                             $controller->addWarning($tableName . ' でバッチ挿入エラー: ' . $e->getMessage(), 'admin');
