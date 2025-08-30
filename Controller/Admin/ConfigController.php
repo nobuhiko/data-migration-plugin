@@ -540,6 +540,7 @@ class ConfigController extends AbstractController
             fclose($handle);
 
             return $i; // indexを返す
+        }
         } catch (\Exception $e) {
             error_log("ERROR: saveToC failed for $csvName: " . $e->getMessage());
             throw $e;
