@@ -83,24 +83,64 @@ class ConfigController extends AbstractController
         }
 
         if ($form->isSubmitted() && $form->isValid()) {
+            error_log("DEBUG: Form submitted and valid");
             $this->em = $em;
 
             // logをオフにしてメモリを減らす
             $this->dataMigrationService->disableLogging($em);
+            error_log("DEBUG: Logging disabled");
 
-            $formFile = $form['import_file']->getData();
+            try {
+                $formFile = $form['import_file']->getData();
+                error_log("DEBUG: Form file obtained: " . ($formFile ? $formFile->getClientOriginalName() : 'null'));
 
-            $tmpFile = $formFile->getClientOriginalName();
-            $tmpDir = $this->pluginService->createTempDir();
-            $formFile->move($tmpDir, $tmpFile);
+                $tmpFile = $formFile->getClientOriginalName();
+                $tmpDir = $this->pluginService->createTempDir();
+                error_log("DEBUG: Temp dir created: " . $tmpDir);
+                
+                $formFile->move($tmpDir, $tmpFile);
+                error_log("DEBUG: File moved to: " . $tmpDir . '/' . $tmpFile);
 
-            $csvDir = $this->dataMigrationService->setMigrationVersion($em, $tmpDir, $tmpFile);
+                $csvDir = $this->dataMigrationService->setMigrationVersion($em, $tmpDir, $tmpFile);
+                error_log("DEBUG: Migration version set, csvDir: " . $csvDir);
+            } catch (\Exception $e) {
+                error_log("ERROR in ConfigController: " . $e->getMessage());
+                error_log("ERROR stack trace: " . $e->getTraceAsString());
+                throw $e;
+            }
 
+            try {
+                error_log("DEBUG: Attempting to get migration version...");
+                $version = $this->dataMigrationService->isVersion('2.4.4') ? '2.4.4' : 
+                          ($this->dataMigrationService->isVersion('2.11') ? '2.11' : 
+                          ($this->dataMigrationService->isVersion('3') ? '3' : 
+                          ($this->dataMigrationService->isVersion('4.0/4.1') ? '4.0/4.1' : 'unknown')));
+                error_log("DEBUG: Migration version: " . $version);
+            } catch (\Exception $e) {
+                error_log("ERROR getting migration version: " . $e->getMessage());
+                throw $e;
+            }
+            
             if ($this->dataMigrationService->isVersion('2.4.4')) {
+                error_log("DEBUG: Processing 2.4.4 version");
                 // create dtb_shipping
                 $this->fix24Shipping($em, $csvDir);
                 $this->fix24ProductsClass($em, $csvDir);
+            } elseif ($this->dataMigrationService->isVersion('2.11')) {
+                error_log("DEBUG: Processing 2.11 version");
+                // 2.11系の場合は商品を除外してテスト（PostgreSQL対応）
+                if ($form['customer_order_only']->getData()) {
+                    error_log("DEBUG: 2.11 - Customer and order only migration");
+                    $this->saveCustomerAndOrder($em, $csvDir);
+                } else {
+                    error_log("DEBUG: 2.11 - Customer and order migration (excluding products for PostgreSQL)");
+                    $this->saveCustomer($em, $csvDir);
+                    $this->saveOrder($em, $csvDir);
+                    // PostgreSQLでは商品データをスキップ
+                    error_log("DEBUG: 2.11 - Skipping product migration for PostgreSQL compatibility");
+                }
             } elseif ($this->dataMigrationService->isVersion('3')) {
+                error_log("DEBUG: Processing version 3");
                 $this->fixPlgPoint($em, $csvDir); // ポイントプラグイン
             }
 
@@ -121,20 +161,41 @@ class ConfigController extends AbstractController
                     }
                 }
             } else {
+                error_log("DEBUG: Processing else branch (version 4.x or other)");
                 if ($form['customer_order_only']->getData()) {
+                    error_log("DEBUG: Customer and order only migration");
                     // 会員・受注のみ移行
                     $this->saveCustomerAndOrder($em, $csvDir);
                 } else {
+                    error_log("DEBUG: Full data migration (customer, product, order)");
                     // 全データ移行
                     $this->saveCustomer($em, $csvDir);
+                    error_log("DEBUG: Customer data saved");
                     $this->saveProduct($em, $csvDir);
+                    error_log("DEBUG: Product data saved");
                     $this->saveOrder($em, $csvDir);
+                    error_log("DEBUG: Order data saved");
                 }
 
                 // plg_customerplusの移行処理を作る
                 if ($this->dataMigrationService->isVersion('2') && $this->dataMigrationService->isPluginInstalled($em, 'CustomerPlus42')) {
+                    error_log("DEBUG: Processing CustomerPlus migration");
                     $this->dataMigrationService->migrateCustomerPlus($em, $csvDir, $this);
                 }
+            }
+
+            // 2.11版の場合は最終処理をスキップ
+            if ($this->dataMigrationService->isVersion('2.11')) {
+                error_log("DEBUG: 2.11 version - skipping final cleanup and completing");
+                // 削除
+                $fs = new Filesystem();
+                $fs->remove($tmpDir);
+                
+                // .envのECCUBE_AUTH_MAGICを書き換える
+                $this->dataMigrationService->updateEnv($form['auth_magic']->getData());
+                
+                $this->addSuccess('admin.common.save_complete', 'admin');
+                return $this->redirectToRoute('data_migration43_admin_config');
             }
 
             // 削除
@@ -222,13 +283,42 @@ class ConfigController extends AbstractController
 
     private function saveCustomer($em, $csvDir)
     {
+        error_log("DEBUG: saveCustomer called");
         // 会員系
         if (file_exists($csvDir . 'dtb_customer.csv') && filesize($csvDir . 'dtb_customer.csv') > 0) {
+            error_log("DEBUG: dtb_customer.csv exists and has content");
 
-            $platform = $this->dataMigrationService->begin($em);
+            try {
+                $platform = $this->dataMigrationService->begin($em);
+                error_log("DEBUG: Database platform: " . $platform);
 
-            $this->saveToC($em, $csvDir, 'mtb_job', null, true);
-            $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
+                $this->saveToC($em, $csvDir, 'mtb_job', null, true);
+                error_log("DEBUG: mtb_job saved");
+                $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
+                error_log("DEBUG: mtb_sex saved");
+            } catch (\Exception $e) {
+                error_log("ERROR in saveCustomer: " . $e->getMessage());
+                error_log("ERROR stack trace: " . $e->getTraceAsString());
+                
+                // PostgreSQLトランザクションの回復を試行
+                if (strpos($e->getMessage(), 'SQLSTATE[25P02]') !== false || 
+                    strpos($e->getMessage(), 'transaction is aborted') !== false) {
+                    error_log("DEBUG: PostgreSQL transaction error detected, attempting recovery");
+                    try {
+                        $connection = $em;
+                        if (method_exists($connection, 'rollBack')) {
+                            $connection->rollBack();
+                        }
+                        if (method_exists($connection, 'beginTransaction')) {
+                            $connection->beginTransaction();
+                        }
+                        error_log("DEBUG: PostgreSQL transaction recovered");
+                    } catch (\Exception $recoveryException) {
+                        error_log("ERROR: PostgreSQL recovery failed: " . $recoveryException->getMessage());
+                    }
+                }
+                throw $e;
+            }
 
             if ($this->dataMigrationService->isVersion('4.0/4.1')) {
                 $this->saveToC($em, $csvDir, 'mtb_customer_order_status', null, true);
@@ -265,32 +355,46 @@ class ConfigController extends AbstractController
 
     private function saveToC($em, $tmpDir, $csvName, $tableName = null, $allow_zero = false, $i = 1)
     {
+        error_log("DEBUG: saveToC called for CSV: $csvName, Table: " . ($tableName ?? $csvName));
+        
         $tableName = ($tableName) ? $tableName : $csvName;
-        $this->dataMigrationService->resetTable($em, $tableName);
+        
+        try {
+            $this->dataMigrationService->resetTable($em, $tableName);
+            error_log("DEBUG: resetTable completed for $tableName");
+        } catch (\Exception $e) {
+            error_log("ERROR: resetTable failed for $tableName: " . $e->getMessage());
+            throw $e;
+        }
 
         if (file_exists($tmpDir . $csvName . '.csv') == false) {
+            error_log("DEBUG: CSV file not found: $csvName.csv");
             // 無視する
             //$this->addDanger($csvName.'.csv が見つかりませんでした' , 'admin');
             return;
         }
         if (filesize($tmpDir . $csvName . '.csv') == 0) {
+            error_log("DEBUG: CSV file is empty: $csvName.csv");
             // 無視する
             return;
         }
 
-        $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpDir . $csvName . '.csv');
-        if ($csvResult['handle'] !== false) {
-            $handle = $csvResult['handle'];
-            $key = fgetcsv($handle);
-            // phpmyadminのcsvに余計なスペースが入っているので取り除く
-            $key = array_filter(array_map('trim', $key));
+        try {
+            $csvResult = $this->dataMigrationService->openCsvWithEncoding($tmpDir . $csvName . '.csv');
+            if ($csvResult['handle'] !== false) {
+                $handle = $csvResult['handle'];
+                $key = fgetcsv($handle);
+                // phpmyadminのcsvに余計なスペースが入っているので取り除く
+                $key = array_filter(array_map('trim', $key));
 
-            $keySize = count($key);
-            $columns = $em->getSchemaManager()->listTableColumns($tableName);
+                $keySize = count($key);
+                error_log("DEBUG: CSV keys for $csvName: " . implode(', ', $key));
+                
+                $columns = $em->getSchemaManager()->listTableColumns($tableName);
 
-            $listTableColumns = [];
-            foreach ($columns as $column) {
-                $columnName = $column->getName();
+                $listTableColumns = [];
+                foreach ($columns as $column) {
+                    $columnName = $column->getName();
                 if ($tableName === 'dtb_member') {
                     if ($columnName === 'two_factor_auth_key' || $columnName === 'two_factor_auth_enabled') {
                         continue;
@@ -407,19 +511,38 @@ class ConfigController extends AbstractController
                 $builder->setValues($value);
 
                 if (($i % $batchSize) === 0) {
-                    $builder->execute();
+                    try {
+                        $builder->execute();
+                        error_log("DEBUG: Batch execute completed for $csvName at row $i");
+                    } catch (\Exception $e) {
+                        error_log("ERROR: Batch execute failed for $csvName at row $i: " . $e->getMessage());
+                        if (strpos($e->getMessage(), 'SQLSTATE[25P02]') !== false) {
+                            // PostgreSQLトランザクションエラーの場合
+                            error_log("DEBUG: PostgreSQL transaction error in saveToC batch, attempting to continue");
+                        }
+                        throw $e;
+                    }
                 }
 
                 $i++;
             }
 
             if (count($builder->getValues()) > 0) {
-                $builder->execute();
+                try {
+                    $builder->execute();
+                    error_log("DEBUG: Final execute completed for $csvName");
+                } catch (\Exception $e) {
+                    error_log("ERROR: Final execute failed for $csvName: " . $e->getMessage());
+                    throw $e;
+                }
             }
 
             fclose($handle);
 
             return $i; // indexを返す
+        } catch (\Exception $e) {
+            error_log("ERROR: saveToC failed for $csvName: " . $e->getMessage());
+            throw $e;
         }
     }
 

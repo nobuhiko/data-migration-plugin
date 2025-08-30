@@ -72,10 +72,22 @@ class DataMigrationService
 
     public function setMigrationVersion($em, $tmpDir, $tmpFile)
     {
-        $archive = UnifiedArchive::open($tmpDir . '/' . $tmpFile);
-        $fileNames = $archive->getFileNames();
-        // 解凍
-        $archive->extractFiles($tmpDir, $fileNames);
+        error_log("DEBUG: setMigrationVersion called with tmpDir: $tmpDir, tmpFile: $tmpFile");
+        try {
+            $archive = UnifiedArchive::open($tmpDir . '/' . $tmpFile);
+            error_log("DEBUG: Archive opened successfully");
+            
+            $fileNames = $archive->getFileNames();
+            error_log("DEBUG: File names in archive: " . json_encode($fileNames));
+            
+            // 解凍
+            $archive->extractFiles($tmpDir, $fileNames);
+            error_log("DEBUG: Files extracted successfully");
+        } catch (\Exception $e) {
+            error_log("ERROR in setMigrationVersion: " . $e->getMessage());
+            error_log("ERROR stack trace: " . $e->getTraceAsString());
+            throw $e;
+        }
 
         // 圧縮方式の間違いに対応する
         $path = pathinfo($fileNames[0]);
@@ -89,12 +101,19 @@ class DataMigrationService
         // 2.4.4系の場合の処理
         if (file_exists($csvDir . 'bkup_data.csv')) {
             $this->cutOff24($csvDir, 'bkup_data.csv');
+            error_log("DEBUG: Found bkup_data.csv - checking for 2.x series");
+            
             // 2.4.4系の場合の処理
             if (file_exists($csvDir . 'dtb_products_class.csv')) {
                 // 2.11の場合は通さない
                 if (!file_exists($csvDir . 'dtb_class_combination.csv')) {
                     $this->migrationVersion = '2.4.4';
+                    error_log("DEBUG: Detected version 2.4.4");
                 }
+            } else {
+                // dtb_products_class.csv がない場合は2.11.x系
+                $this->migrationVersion = '2.11';
+                error_log("DEBUG: Detected version 2.11 (no dtb_products_class.csv)");
             }
         }
 
