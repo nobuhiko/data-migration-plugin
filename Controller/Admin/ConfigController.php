@@ -374,16 +374,9 @@ class ConfigController extends AbstractController
         
         $tableName = ($tableName) ? $tableName : $csvName;
         
-        try {
-            $this->dataMigrationService->resetTable($em, $tableName);
-            error_log("DEBUG: resetTable completed for $tableName");
-        } catch (\Exception $e) {
-            error_log("ERROR: resetTable failed for $tableName: " . $e->getMessage());
-            throw $e;
-        }
-
+        // ファイル存在チェックを先に行う
         if (file_exists($tmpDir . $csvName . '.csv') == false) {
-            error_log("DEBUG: CSV file not found: $csvName.csv");
+            error_log("DEBUG: saveToC - CSV file not found: $csvName.csv");
             // 無視する
             //$this->addDanger($csvName.'.csv が見つかりませんでした' , 'admin');
             return;
@@ -392,6 +385,15 @@ class ConfigController extends AbstractController
             error_log("DEBUG: CSV file is empty: $csvName.csv");
             // 無視する
             return;
+        }
+
+        // ファイルが存在し、内容がある場合のみテーブルをリセット
+        try {
+            $this->dataMigrationService->resetTable($em, $tableName);
+            error_log("DEBUG: resetTable completed for $tableName");
+        } catch (\Exception $e) {
+            error_log("ERROR: resetTable failed for $tableName: " . $e->getMessage());
+            throw $e;
         }
 
         try {
@@ -1306,13 +1308,16 @@ class ConfigController extends AbstractController
     private function saveToO($em, $tmpDir, $csvName, $tableName = null, $allow_zero = false, $i = 1)
     {
         $tableName = ($tableName) ? $tableName : $csvName;
-        $this->dataMigrationService->resetTable($em, $tableName);
-
+        
+        // ファイル存在チェックを先に行う
         if (file_exists($tmpDir . $csvName . '.csv') == false) {
             // 無視する
+            error_log("DEBUG: saveToO - CSV file not found: $csvName.csv");
             //$this->addDanger($csvName.'.csv が見つかりませんでした' , 'admin');
             return;
         }
+        
+        $this->dataMigrationService->resetTable($em, $tableName);
         if (filesize($tmpDir . $csvName . '.csv') == 0) {
             // 無視する
             $this->addWarning($csvName . '.csv のデータがありません。', 'admin');
