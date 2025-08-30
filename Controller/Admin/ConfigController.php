@@ -226,23 +226,32 @@ class ConfigController extends AbstractController
 
     private function saveCustomerAndOrder($em, $csvDir)
     {
-        $platform = $this->dataMigrationService->begin($em);
+        error_log("DEBUG: saveCustomerAndOrder called");
+        try {
+            $platform = $this->dataMigrationService->begin($em);
+            error_log("DEBUG: Platform: $platform");
 
-        // 会員
-        $this->saveToC($em, $csvDir, 'dtb_customer');
+            // 会員
+            error_log("DEBUG: Saving customer data");
+            $this->saveToC($em, $csvDir, 'dtb_customer');
+            error_log("DEBUG: Customer data saved successfully");
 
-        if ($this->dataMigrationService->isVersion('4.0/4.1')) {
-            $this->saveToC($em, $csvDir, 'dtb_customer_address');
-            $this->saveToO($em, $csvDir, 'dtb_delivery_time');
-        } else if ($this->dataMigrationService->isVersion('3')) {
-            $this->saveToC($em, $csvDir, 'dtb_customer_address');
-            $this->saveToO($em, $csvDir, 'dtb_delivery_time');
-        } else {
-            $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1/*$index*/);
-        }
+            if ($this->dataMigrationService->isVersion('4.0/4.1')) {
+                error_log("DEBUG: Processing 4.0/4.1 customer address");
+                $this->saveToC($em, $csvDir, 'dtb_customer_address');
+                $this->saveToO($em, $csvDir, 'dtb_delivery_time');
+            } else if ($this->dataMigrationService->isVersion('3')) {
+                error_log("DEBUG: Processing version 3 customer address");
+                $this->saveToC($em, $csvDir, 'dtb_customer_address');
+                $this->saveToO($em, $csvDir, 'dtb_delivery_time');
+            } else {
+                error_log("DEBUG: Processing legacy customer address (dtb_other_deliv)");
+                $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1/*$index*/);
+            }
 
-        // 受注
-        $this->saveToO($em, $csvDir, 'dtb_order');
+            // 受注
+            error_log("DEBUG: Saving order data");
+            $this->saveToO($em, $csvDir, 'dtb_order');
         $this->saveToO($em, $csvDir, 'dtb_shipping');
         $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
         if ($this->dataMigrationService->isVersion('4.0/4.1')) {
@@ -277,8 +286,14 @@ class ConfigController extends AbstractController
             $this->dataMigrationService->setIdSeq($em, 'dtb_mail_history');
         }
 
-        $em->commit();
-        $this->addSuccess('会員データ・受注データを登録しました。', 'admin');
+            $em->commit();
+            error_log("DEBUG: saveCustomerAndOrder completed successfully");
+            $this->addSuccess('会員データ・受注データを登録しました。', 'admin');
+        } catch (\Exception $e) {
+            error_log("ERROR in saveCustomerAndOrder: " . $e->getMessage());
+            error_log("ERROR stack trace: " . $e->getTraceAsString());
+            throw $e;
+        }
     }
 
     private function saveCustomer($em, $csvDir)
