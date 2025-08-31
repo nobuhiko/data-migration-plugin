@@ -388,7 +388,14 @@ class ConfigController extends AbstractController
         }
 
         // ファイルが存在し、内容がある場合のみテーブルをリセット
-        $connection = $em->getConnection();
+        // EntityManagerまたはConnectionオブジェクトかを判定
+        if (method_exists($em, 'getConnection')) {
+            // EntityManagerの場合
+            $connection = $em->getConnection();
+        } else {
+            // Connectionオブジェクトの場合
+            $connection = $em;
+        }
         try {
             // PostgreSQL用の外部キー制約対策
             if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
@@ -1922,7 +1929,16 @@ class ConfigController extends AbstractController
         $date = new \DateTime($datetime, new \DateTimeZone($this->eccubeConfig->get('timezone')));
         $date->setTimezone(new \DateTimeZone('UTC'));
 
-        return $date->format($this->em->getDatabasePlatform()->getDateTimeTzFormatString());
+        // EntityManagerまたはConnectionオブジェクトかを判定
+        if (method_exists($this->em, 'getConnection')) {
+            // EntityManagerの場合
+            $platform = $this->em->getConnection()->getDatabasePlatform();
+        } else {
+            // Connectionオブジェクトの場合
+            $platform = $this->em->getDatabasePlatform();
+        }
+        
+        return $date->format($platform->getDateTimeTzFormatString());
     }
 
     private function getTaxRule($order_date)

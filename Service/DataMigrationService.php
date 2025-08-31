@@ -311,17 +311,26 @@ class DataMigrationService
 
     public function begin($em)
     {
-        $em->beginTransaction();
+        // EntityManagerまたはConnectionオブジェクトかを判定
+        if (method_exists($em, 'getConnection')) {
+            // EntityManagerの場合
+            $connection = $em->getConnection();
+        } else {
+            // Connectionオブジェクトの場合
+            $connection = $em;
+        }
+        
+        $connection->beginTransaction();
         $platform = $this->getDatabasePlatformName($em);
 
         if ($platform == 'mysql') {
-            $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-            $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
+            $connection->exec('SET FOREIGN_KEY_CHECKS = 0;');
+            $connection->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } elseif ($platform == 'postgresql') {
             // PostgreSQLではsession_replication_roleの代わりに制約を遅延実行に設定
             try {
                 // 既存の遅延可能制約があれば遅延実行に設定
-                $em->exec('SET CONSTRAINTS ALL DEFERRED;');
+                $connection->exec('SET CONSTRAINTS ALL DEFERRED;');
             } catch (\Exception $e) {
                 // 遅延制約が設定されていない場合は無視
                 // このケースでは個別にエラーハンドリングする
