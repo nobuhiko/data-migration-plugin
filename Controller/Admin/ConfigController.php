@@ -388,9 +388,9 @@ class ConfigController extends AbstractController
         }
 
         // ファイルが存在し、内容がある場合のみテーブルをリセット
+        $connection = $em->getConnection();
         try {
             // PostgreSQL用の外部キー制約対策
-            $connection = $em->getConnection();
             if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
                 $connection->executeStatement('SET session_replication_role = replica');
             }
@@ -404,7 +404,7 @@ class ConfigController extends AbstractController
             }
         } catch (\Exception $e) {
             // エラー時も設定を元に戻す
-            if (isset($connection) && $connection->getDatabasePlatform()->getName() === 'postgresql') {
+            if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
                 try {
                     $connection->executeStatement('SET session_replication_role = DEFAULT');
                 } catch (\Exception $cleanupE) {

@@ -23,6 +23,7 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
     {
         parent::setUp();
         
+        /*
         // PostgreSQLで特別な処理を行う
         if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
             // DAMA DoctrineTestBundleを完全に無効にする
