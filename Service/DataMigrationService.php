@@ -258,11 +258,7 @@ class DataMigrationService
 
     public function begin($em)
     {
-        // テスト環境などですでにトランザクションが開始されている場合はスキップ
-        if (!$em->isTransactionActive()) {
-            $em->beginTransaction();
-        }
-        
+        $em->beginTransaction();
         $platform = $em->getDatabasePlatform()->getName();
 
         if ($platform == 'mysql') {
