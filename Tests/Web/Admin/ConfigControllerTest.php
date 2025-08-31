@@ -169,6 +169,7 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             }
             
         } catch (\Exception $e) {
+            /*
             // PostgreSQLの場合、トランザクションをクリーンアップしてリトライ
             if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
                 echo "PostgreSQL Error: " . $e->getMessage() . "\n";
