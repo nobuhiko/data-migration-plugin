@@ -276,7 +276,7 @@ class ConfigController extends AbstractController
         }
 
         if ($platform == 'mysql') {
-            $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+            $connection->exec('SET FOREIGN_KEY_CHECKS = 1;');
         } else {
             $this->dataMigrationService->setIdSeq($em, 'dtb_customer');
             $this->dataMigrationService->setIdSeq($em, 'dtb_customer_address');
@@ -306,6 +306,15 @@ class ConfigController extends AbstractController
             try {
                 $platform = $this->dataMigrationService->begin($em);
                 error_log("DEBUG: Database platform: " . $platform);
+                
+                // EntityManagerまたはConnectionオブジェクトかを判定
+                if (method_exists($em, 'getConnection')) {
+                    // EntityManagerの場合
+                    $connection = $em->getConnection();
+                } else {
+                    // Connectionオブジェクトの場合
+                    $connection = $em;
+                }
 
                 $this->saveToC($em, $csvDir, 'mtb_job', null, true);
                 error_log("DEBUG: mtb_job saved");
@@ -354,7 +363,7 @@ class ConfigController extends AbstractController
             $this->saveToC($em, $csvDir, 'dtb_member', null, true);
 
             if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+                $connection->exec('SET FOREIGN_KEY_CHECKS = 1;');
             } else {
                 $this->dataMigrationService->setIdSeq($em, 'dtb_member');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_customer');
@@ -602,6 +611,15 @@ class ConfigController extends AbstractController
 
         if (file_exists($csvDir . $product_db_name . '.csv') && filesize($csvDir . $product_db_name . '.csv') > 0) {
             $platform = $this->dataMigrationService->begin($em);
+            
+            // EntityManagerまたはConnectionオブジェクトかを判定
+            if (method_exists($em, 'getConnection')) {
+                // EntityManagerの場合
+                $connection = $em->getConnection();
+            } else {
+                // Connectionオブジェクトの場合
+                $connection = $em;
+            }
 
             // 2.11系の処理
             if (file_exists($csvDir . 'dtb_class_combination.csv')) {
@@ -659,7 +677,7 @@ class ConfigController extends AbstractController
             $this->dataMigrationService->fixDeletedProduct($em);
 
             if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+                $connection->exec('SET FOREIGN_KEY_CHECKS = 1;');
             } else {
                 // シーケンスを進めてあげないといけない
                 $this->dataMigrationService->setIdSeq($em, 'dtb_product');
@@ -685,7 +703,8 @@ class ConfigController extends AbstractController
     private function saveToP($em, $tmpDir, $csvName, $tableName = null, $allow_zero = false, $i = 1)
     {
         $tableName = ($tableName) ? $tableName : $csvName;
-        $this->dataMigrationService->resetTable($em->getConnection(), $tableName);
+        $connection = $em->getConnection();
+        $this->dataMigrationService->resetTable($connection, $tableName);
 
         $csvFilePath = $tmpDir . $csvName . '.csv';
         
@@ -1081,7 +1100,7 @@ class ConfigController extends AbstractController
 
             if ($platform == 'mysql') {
                 // mysql5.6でエラーになるのでtempは使えない
-                $em->exec('
+                $connection->exec('
                     CREATE TABLE IF NOT EXISTS dtb_class_combination (
                     class_combination_id int NOT NULL,
                     parent_class_combination_id int,
@@ -1091,7 +1110,7 @@ class ConfigController extends AbstractController
                     ) ENGINE=InnoDB;
                 ');
             } else {
-                $em->exec('
+                $connection->exec('
                     CREATE TEMP TABLE dtb_class_combination (
                         class_combination_id int,
                         parent_class_combination_id int,
@@ -1171,7 +1190,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM ' . $tableName);
+        $connection->exec('DELETE FROM ' . $tableName);
 
         $i = 1;
         $batchSize = 20;
@@ -1210,7 +1229,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM ' . $tableName);
+        $connection->exec('DELETE FROM ' . $tableName);
 
         $i = 1;
         $batchSize = 20;
@@ -1302,12 +1321,12 @@ class ConfigController extends AbstractController
 
             if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
                 // 支払いは基本移行しない
-                $em->exec('DELETE FROM dtb_payment_option');
+                $connection->exec('DELETE FROM dtb_payment_option');
             }
 
 
             if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+                $connection->exec('SET FOREIGN_KEY_CHECKS = 1;');
             } else {
                 $this->dataMigrationService->setIdSeq($em, 'dtb_order');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_order_item');
@@ -1321,7 +1340,7 @@ class ConfigController extends AbstractController
             }
 
             // イレギュラー対応
-            $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
+            $connection->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
 
             $em->commit();
 
@@ -1343,7 +1362,8 @@ class ConfigController extends AbstractController
             return;
         }
         
-        $this->dataMigrationService->resetTable($em->getConnection(), $tableName);
+        $connection = $em->getConnection();
+        $this->dataMigrationService->resetTable($connection, $tableName);
         if (filesize($tmpDir . $csvName . '.csv') == 0) {
             // 無視する
             $this->addWarning($csvName . '.csv のデータがありません。', 'admin');
@@ -1782,7 +1802,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $i = $em->fetchOne('SELECT max(id) + 1  FROM ' . $tableName);
+        $i = $connection->fetchOne('SELECT max(id) + 1  FROM ' . $tableName);
         $batchSize = 20;
         foreach ($this->order_item as $order_id => $type) {
             foreach ($type as $key => $value) {
@@ -1978,7 +1998,8 @@ class ConfigController extends AbstractController
         }
 
         $platform = $this->dataMigrationService->begin($em);
-        $this->dataMigrationService->resetTable($em->getConnection(), $tableName);
+        $connection = $em->getConnection();
+        $this->dataMigrationService->resetTable($connection, $tableName);
 
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
