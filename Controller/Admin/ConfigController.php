@@ -395,7 +395,7 @@ class ConfigController extends AbstractController
                 $connection->executeStatement('SET session_replication_role = replica');
             }
             
-            $this->dataMigrationService->resetTable($em, $tableName);
+            $this->dataMigrationService->resetTable($connection, $tableName);
             error_log("DEBUG: resetTable completed for $tableName");
             
             // PostgreSQL用の設定を元に戻す
@@ -678,7 +678,7 @@ class ConfigController extends AbstractController
     private function saveToP($em, $tmpDir, $csvName, $tableName = null, $allow_zero = false, $i = 1)
     {
         $tableName = ($tableName) ? $tableName : $csvName;
-        $this->dataMigrationService->resetTable($em, $tableName);
+        $this->dataMigrationService->resetTable($em->getConnection(), $tableName);
 
         $csvFilePath = $tmpDir . $csvName . '.csv';
         
@@ -1336,7 +1336,7 @@ class ConfigController extends AbstractController
             return;
         }
         
-        $this->dataMigrationService->resetTable($em, $tableName);
+        $this->dataMigrationService->resetTable($em->getConnection(), $tableName);
         if (filesize($tmpDir . $csvName . '.csv') == 0) {
             // 無視する
             $this->addWarning($csvName . '.csv のデータがありません。', 'admin');
@@ -1962,7 +1962,7 @@ class ConfigController extends AbstractController
         }
 
         $platform = $this->dataMigrationService->begin($em);
-        $this->dataMigrationService->resetTable($em, $tableName);
+        $this->dataMigrationService->resetTable($em->getConnection(), $tableName);
 
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
