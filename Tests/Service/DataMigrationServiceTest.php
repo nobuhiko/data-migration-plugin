@@ -49,12 +49,23 @@ class DataMigrationServiceTest extends EccubeTestCase
         
         // PostgreSQLの場合、トランザクションエラーをクリア
         $em = $this->entityManager;
-        if ($em && $em->getConnection()->isTransactionActive()) {
-            while ($em->getConnection()->getTransactionNestingLevel() > 0) {
-                try {
-                    $em->getConnection()->rollBack();
-                } catch (\Exception $e) {
-                    // エラーを無視
+        if ($em) {
+            // EntityManagerまたはConnectionオブジェクトかを判定
+            if (method_exists($em, 'getConnection')) {
+                // EntityManagerの場合
+                $connection = $em->getConnection();
+            } else {
+                // Connectionオブジェクトの場合
+                $connection = $em;
+            }
+            
+            if ($connection->isTransactionActive()) {
+                while ($connection->getTransactionNestingLevel() > 0) {
+                    try {
+                        $connection->rollBack();
+                    } catch (\Exception $e) {
+                        // エラーを無視
+                    }
                 }
             }
         }
