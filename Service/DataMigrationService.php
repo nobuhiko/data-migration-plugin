@@ -426,6 +426,14 @@ class DataMigrationService
             } // end while
             fclose($fpcsv);
             fclose($handle);
+            
+            // 作成されたCSVファイルをログ出力
+            $createdFiles = glob($tmpDir . '*.csv');
+            error_log("DEBUG: Created CSV files after cutOff24:");
+            foreach ($createdFiles as $file) {
+                $size = filesize($file);
+                error_log("  - " . basename($file) . " (size: $size bytes)");
+            }
         }
     }
 
