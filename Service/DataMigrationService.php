@@ -583,7 +583,7 @@ class DataMigrationService
         $allTables = array_merge($importOrder, ['plg_customerplus_dtb_customer']);
         foreach ($allTables as $tableName) {
             if ($em->getSchemaManager()->tablesExist([$tableName])) {
-                $this->resetTable($em, $tableName);
+                $this->resetTable($em->getConnection(), $tableName);
             }
         }
 
