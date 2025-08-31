@@ -173,21 +173,23 @@ class DataMigrationService
         }
         
         try {
-            $columns = $em->getSchemaManager()->listTableColumns($tableName);
-            
             foreach ($data as $key => &$value) {
-                if (isset($columns[$key])) {
-                    $column = $columns[$key];
-                    $type = $column->getType()->getName();
-                    
-                    // 数値型の場合、空文字をNULLに変換
-                    if (in_array($type, ['integer', 'bigint', 'smallint', 'decimal', 'float', 'numeric']) && $value === '') {
-                        error_log("Converting empty string to NULL for column '$key' of type '$type' in table '$tableName'");
-                        $value = null;
-                    }
-                    // 真偽値型の場合の処理
-                    elseif ($type === 'boolean' && $value === '') {
-                        $value = null;
+                // 空文字の場合のみNULL変換を行う（欠落フィールドは処理しない）
+                if ($value === '') {
+                    $columns = $em->getSchemaManager()->listTableColumns($tableName);
+                    if (isset($columns[$key])) {
+                        $column = $columns[$key];
+                        $type = $column->getType()->getName();
+                        
+                        // 数値型の場合、空文字をNULLに変換
+                        if (in_array($type, ['integer', 'bigint', 'smallint', 'decimal', 'float', 'numeric'])) {
+                            error_log("Converting empty string to NULL for column '$key' of type '$type' in table '$tableName'");
+                            $value = null;
+                        }
+                        // 真偽値型の場合の処理
+                        elseif ($type === 'boolean') {
+                            $value = null;
+                        }
                     }
                 }
             }
