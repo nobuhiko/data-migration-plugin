@@ -389,9 +389,28 @@ class ConfigController extends AbstractController
 
         // ファイルが存在し、内容がある場合のみテーブルをリセット
         try {
+            // PostgreSQL用の外部キー制約対策
+            $connection = $em->getConnection();
+            if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
+                $connection->executeStatement('SET session_replication_role = replica');
+            }
+            
             $this->dataMigrationService->resetTable($em, $tableName);
             error_log("DEBUG: resetTable completed for $tableName");
+            
+            // PostgreSQL用の設定を元に戻す
+            if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
+                $connection->executeStatement('SET session_replication_role = DEFAULT');
+            }
         } catch (\Exception $e) {
+            // エラー時も設定を元に戻す
+            if (isset($connection) && $connection->getDatabasePlatform()->getName() === 'postgresql') {
+                try {
+                    $connection->executeStatement('SET session_replication_role = DEFAULT');
+                } catch (\Exception $cleanupE) {
+                    // クリーンアップエラーは無視
+                }
+            }
             error_log("ERROR: resetTable failed for $tableName: " . $e->getMessage());
             throw $e;
         }
