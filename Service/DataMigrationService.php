@@ -191,6 +191,14 @@ class DataMigrationService
 
     public function fixDeletedProduct($em)
     {
+        // EntityManagerまたはConnectionオブジェクトかを判定
+        if (method_exists($em, 'getConnection')) {
+            // EntityManagerの場合
+            $connection = $em->getConnection();
+        } else {
+            // Connectionオブジェクトの場合
+            $connection = $em;
+        }
         $sql = 'UPDATE
             dtb_product_class
         SET
@@ -214,18 +222,18 @@ class DataMigrationService
                     ) AS t
             )';
 
-        $em->getConnection()->exec($sql);
+        $connection->exec($sql);
 
         // リレーションエラーになるので
-        $em->getConnection()->exec('DELETE FROM dtb_cart');
-        $em->getConnection()->exec('DELETE FROM dtb_cart_item');
+        $connection->exec('DELETE FROM dtb_cart');
+        $connection->exec('DELETE FROM dtb_cart_item');
 
         // 外部キー制約エラーになるデータを消す
         $platform = $this->getDatabasePlatformName($em);
         
         // PostgreSQL対応: id = 0 の処理
         try {
-            $em->getConnection()->exec('DELETE FROM dtb_class_category WHERE id = 0');
+            $connection->exec('DELETE FROM dtb_class_category WHERE id = 0');
         } catch (\Exception $e) {
             if ($platform === 'postgresql') {
                 // PostgreSQLでトランザクション回復を試行
@@ -242,33 +250,33 @@ class DataMigrationService
         // PostgreSQL対応: NOT IN を NOT EXISTS に変更
         if ($platform === 'postgresql') {
             try {
-                $em->getConnection()->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id1)');
-                $em->getConnection()->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id2)');
+                $connection->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id1)');
+                $connection->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE NOT EXISTS (SELECT 1 FROM dtb_class_category WHERE id = dtb_product_class.class_category_id2)');
             } catch (\Exception $e) {
                 if (!$this->recoverPostgreSQLTransaction($em, $e)) {
                     throw $e;
                 }
             }
         } else {
-            $em->getConnection()->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
-            $em->getConnection()->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
+            $connection->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
+            $connection->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
         }
 
         // PostgreSQL対応: サブクエリの書き方を変更
         if ($platform === 'postgresql') {
             try {
-                $em->getConnection()->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_tag WHERE dtb_tag.id = dtb_product_tag.tag_id)');
-                $em->getConnection()->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_product WHERE dtb_product.id = dtb_product_tag.product_id)');
+                $connection->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_tag WHERE dtb_tag.id = dtb_product_tag.tag_id)');
+                $connection->exec('DELETE FROM dtb_product_tag WHERE NOT EXISTS (SELECT 1 FROM dtb_product WHERE dtb_product.id = dtb_product_tag.product_id)');
             } catch (\Exception $e) {
                 if (!$this->recoverPostgreSQLTransaction($em, $e)) {
                     throw $e;
                 }
             }
         } else {
-            $em->getConnection()->exec('delete from dtb_product_tag where id in (
+            $connection->exec('delete from dtb_product_tag where id in (
                             select id from (select t1.id from dtb_product_tag t1 left join dtb_tag t2 on t1.tag_id = t2.id where t2.id is null) as tmp
                         );');
-            $em->getConnection()->exec('delete from dtb_product_tag where id in (
+            $connection->exec('delete from dtb_product_tag where id in (
                             select id from (select t1.id from dtb_product_tag t1 left join dtb_product t2 on t1.product_id = t2.id where t2.id is null) as tmp
                         );');
         }
@@ -584,6 +592,14 @@ class DataMigrationService
      */
     public function migrateCustomerPlus($em, $csvDir, $controller)
     {
+        // EntityManagerまたはConnectionオブジェクトかを判定
+        if (method_exists($em, 'getConnection')) {
+            // EntityManagerの場合
+            $connection = $em->getConnection();
+        } else {
+            // Connectionオブジェクトの場合
+            $connection = $em;
+        }
         $platform = $this->begin($em);
 
         // 移行するテーブルの順序を定義
@@ -686,14 +702,14 @@ class DataMigrationService
         }
 
         if ($platform == 'mysql') {
-            $em->getConnection()->exec('SET FOREIGN_KEY_CHECKS = 1;');
+            $connection->exec('SET FOREIGN_KEY_CHECKS = 1;');
         } elseif ($platform == 'postgresql') {
             foreach ($importOrder as $tableName) {
                 $this->setIdSeq($em, $tableName);
             }
             // PostgreSQLの制約設定をリセット（session_replication_roleは不要）
             try {
-                $em->getConnection()->exec('SET CONSTRAINTS ALL IMMEDIATE;');
+                $connection->exec('SET CONSTRAINTS ALL IMMEDIATE;');
             } catch (\Exception $e) {
                 // 制約の設定でエラーが発生した場合は無視
             }
