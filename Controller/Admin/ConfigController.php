@@ -1173,6 +1173,9 @@ class ConfigController extends AbstractController
 
                 // 1行目をkeyとした配列を作る
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
+                
+                // PostgreSQL対応: 数値フィールドの空文字をNULLに変換
+                $data = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $data);
 
                 // order_ の文字を除去
                 foreach ($data as $k => $v) {

@@ -157,6 +157,48 @@ class DataMigrationService
         return $data;
     }
 
+    /**
+     * PostgreSQL対応のためのデータ型変換
+     * 数値フィールドの空文字をNULLに変換
+     * @param Connection $em
+     * @param string $tableName
+     * @param array $data
+     * @return array
+     */
+    public function convertDataTypesForPostgreSQL($em, $tableName, $data)
+    {
+        // PostgreSQL以外は処理しない
+        if ($em->getDatabasePlatform()->getName() !== 'postgresql') {
+            return $data;
+        }
+        
+        try {
+            $columns = $em->getSchemaManager()->listTableColumns($tableName);
+            
+            foreach ($data as $key => &$value) {
+                if (isset($columns[$key])) {
+                    $column = $columns[$key];
+                    $type = $column->getType()->getName();
+                    
+                    // 数値型の場合、空文字をNULLに変換
+                    if (in_array($type, ['integer', 'bigint', 'smallint', 'decimal', 'float', 'numeric']) && $value === '') {
+                        error_log("Converting empty string to NULL for column '$key' of type '$type' in table '$tableName'");
+                        $value = null;
+                    }
+                    // 真偽値型の場合の処理
+                    elseif ($type === 'boolean' && $value === '') {
+                        $value = null;
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            error_log("Error in convertDataTypesForPostgreSQL: " . $e->getMessage());
+            // エラーが発生した場合は元のデータをそのまま返す
+        }
+        
+        return $data;
+    }
+
     public function checkUploadSize()
     {
         if (!$filesize = ini_get('upload_max_filesize')) {
@@ -223,7 +265,13 @@ class DataMigrationService
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } else {
-            $em->exec('SET session_replication_role = replica;'); // need super user
+            // PostgreSQLの場合、外部キー制約を無効化
+            try {
+                $em->exec('SET session_replication_role = replica;'); // need super user
+            } catch (\Exception $e) {
+                // スーパーユーザー権限がない場合はエラーログを出力
+                error_log('Warning: Could not set session_replication_role to replica. Foreign key constraints remain active.');
+            }
         }
 
         return $platform;
