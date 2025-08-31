@@ -138,14 +138,14 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             ];
 
         // 2.11系のmysqlにはcreate tableが使われているので、商品を除外してテストする
-        if ($v == '2_11_5' && $this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'mysql') {
+        if ($v == '2_11_5' && (method_exists($this->entityManager, 'getConnection') ? $this->entityManager->getConnection()->getDatabasePlatform()->getName() : $this->entityManager->getDatabasePlatform()->getName()) === 'mysql') {
             $post['config']['customer_order_only'] = 1;
         }
 
         try {
             // PostgreSQL環境でのトランザクション状態確認
-            if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
-                $connection = $this->entityManager->getConnection();
+            if ((method_exists($this->entityManager, 'getConnection') ? $this->entityManager->getConnection()->getDatabasePlatform()->getName() : $this->entityManager->getDatabasePlatform()->getName()) === 'postgresql') {
+                $connection = method_exists($this->entityManager, 'getConnection') ? $this->entityManager->getConnection() : $this->entityManager;
                 if ($connection->isTransactionActive() && $connection->getTransactionNestingLevel() > 0) {
                     // 古いトランザクションをクリーンアップ
                     while ($connection->getTransactionNestingLevel() > 0) {
@@ -171,10 +171,10 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         } catch (\Exception $e) {
             /*
             // PostgreSQLの場合、トランザクションをクリーンアップしてリトライ
-            if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
+            if ((method_exists($this->entityManager, 'getConnection') ? $this->entityManager->getConnection()->getDatabasePlatform()->getName() : $this->entityManager->getDatabasePlatform()->getName()) === 'postgresql') {
                 echo "PostgreSQL Error: " . $e->getMessage() . "\n";
                 
-                $connection = $this->entityManager->getConnection();
+                $connection = method_exists($this->entityManager, 'getConnection') ? $this->entityManager->getConnection() : $this->entityManager;
                 try {
                     if ($connection->isTransactionActive()) {
                         while ($connection->getTransactionNestingLevel() > 0) {
@@ -193,11 +193,11 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         }
         
         // PostgreSQL環境での特別処理
-        if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
+        if ((method_exists($this->entityManager, 'getConnection') ? $this->entityManager->getConnection()->getDatabasePlatform()->getName() : $this->entityManager->getDatabasePlatform()->getName()) === 'postgresql') {
             try {
                 // Entity Managerをクリア
                 $this->entityManager->clear();
-                $connection = $this->entityManager->getConnection();
+                $connection = method_exists($this->entityManager, 'getConnection') ? $this->entityManager->getConnection() : $this->entityManager;
                 
                 // 接続状態を確認・修復
                 if (!$connection->isConnected()) {
@@ -224,7 +224,7 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             $orders = $this->entityManager->getRepository(Order::class)->findAll();
         } catch (\Exception $e) {
             // PostgreSQLでのトランザクションエラーの場合、テストをスキップ
-            if ($this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
+            if ((method_exists($this->entityManager, 'getConnection') ? $this->entityManager->getConnection()->getDatabasePlatform()->getName() : $this->entityManager->getDatabasePlatform()->getName()) === 'postgresql') {
                 $this->markTestSkipped('PostgreSQL data access error: ' . $e->getMessage());
             }
             throw $e;
