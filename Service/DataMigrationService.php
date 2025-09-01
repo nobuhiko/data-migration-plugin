@@ -141,6 +141,12 @@ class DataMigrationService
         $platform = $em->getDatabasePlatform()->getName();
         error_log("PostgreSQL Debug: Platform detected as '$platform' for table '$tableName'");
         error_log("PostgreSQL Debug: Platform class: " . get_class($em->getDatabasePlatform()));
+        // Force output for debugging
+        echo "\n=== PLATFORM DEBUG ===\n";
+        echo "Platform: " . $platform . "\n";
+        echo "Class: " . get_class($em->getDatabasePlatform()) . "\n";
+        echo "Table: " . $tableName . "\n";
+        echo "========================\n";
 
         if ($platform == 'mysql' || strpos($platform, 'mysql') !== false) {
             error_log("PostgreSQL Debug: Using MySQL DELETE for table '$tableName'");
