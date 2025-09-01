@@ -991,7 +991,8 @@ class ConfigController extends AbstractController
                 ');
             }
 
-            $builder = new BulkInsertQuery($em, 'dtb_class_combination');
+            $tableName = 'dtb_class_combination';
+            $builder = new BulkInsertQuery($em, $tableName);
             $builder->setColumns(['class_combination_id', 'parent_class_combination_id', 'classcategory_id', 'level']);
 
             $i = 1;
