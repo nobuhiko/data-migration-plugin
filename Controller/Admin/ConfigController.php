@@ -309,6 +309,9 @@ class ConfigController extends AbstractController
                 // 1行目をkeyとした配列を作る
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
 
+                // PostgreSQL対応: 数値フィールドの空文字をNULLに変換
+                $data = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $data);
+
                 // Schemaにあわせた配列を作成する
                 foreach ($listTableColumns as $column) {
                     if ($this->dataMigrationService->isVersion('4.0/4.1') == true) {
@@ -403,17 +406,34 @@ class ConfigController extends AbstractController
                         }
                     }
                 }
+                
+                // PostgreSQL対応: 最終チェックで数値フィールドの空文字をNULLに変換
+                $value = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $value);
+                
                 $builder->setValues($value);
 
                 if (($i % $batchSize) === 0) {
-                    $builder->execute();
+                    try {
+                        $builder->execute();
+                    } catch (\Exception $e) {
+                        error_log("BulkInsertQuery execute error in saveToC table '$tableName' at row $i: " . $e->getMessage());
+                        error_log("Failed data for row $i: " . json_encode($value));
+                        error_log("Original CSV data: " . json_encode($data));
+                        throw $e;
+                    }
                 }
 
                 $i++;
             }
 
             if (count($builder->getValues()) > 0) {
-                $builder->execute();
+                try {
+                    $builder->execute();
+                } catch (\Exception $e) {
+                    error_log("BulkInsertQuery final execute error in saveToC table '$tableName': " . $e->getMessage());
+                    error_log("Failed final batch, data count: " . count($builder->getValues()));
+                    throw $e;
+                }
             }
 
             fclose($handle);
@@ -551,6 +571,9 @@ class ConfigController extends AbstractController
 
                 // 1行目をkeyとした配列を作る
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
+
+                // PostgreSQL対応: 数値フィールドの空文字をNULLに変換
+                $data = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $data);
 
                 if ($this->dataMigrationService->isVersion('3')) {
                     if (isset($data['class_category_id1'])) {
@@ -764,6 +787,9 @@ class ConfigController extends AbstractController
 
                         break;
                 }
+
+                // PostgreSQL対応: 最終チェックで数値フィールドの空文字をNULLに変換
+                $value = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $value);
 
                 $builder->setValues($value);
 
@@ -1544,6 +1570,9 @@ class ConfigController extends AbstractController
                         $value['method_class'] = 'Eccube\Service\Payment\Method\Cash';
                         break;
                 }
+
+                // PostgreSQL対応: 最終チェックで数値フィールドの空文字をNULLに変換
+                $value = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $value);
 
                 $builder->setValues($value);
 
