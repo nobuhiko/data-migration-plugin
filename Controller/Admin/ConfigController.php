@@ -2518,13 +2518,25 @@ class ConfigController extends AbstractController
     {
         error_log("PostgreSQL Debug: Starting two-phase process (TRUNCATE then INSERT)");
         
-        // Phase 1: TRUNCATE CASCADE all target tables
-        $this->truncateAllTargetTables($em);
-        
-        // Phase 2: INSERT in dependency order
-        $this->insertInDependencyOrder($em, $csvDir);
-        
-        error_log("PostgreSQL Debug: Two-phase process completed");
+        try {
+            // トランザクション状態を確認・リセット
+            $this->resetPostgreSQLTransaction($em);
+            
+            // Phase 1: TRUNCATE CASCADE all target tables
+            $this->truncateAllTargetTables($em);
+            
+            // Phase 2: INSERT in dependency order
+            $this->insertInDependencyOrder($em, $csvDir);
+            
+            error_log("PostgreSQL Debug: Two-phase process completed successfully");
+            
+        } catch (\Exception $e) {
+            error_log("PostgreSQL Debug: Two-phase process failed: " . $e->getMessage());
+            
+            // エラー時はトランザクションをリセット
+            $this->resetPostgreSQLTransaction($em);
+            throw $e;
+        }
     }
 
     /**
@@ -2565,6 +2577,12 @@ class ConfigController extends AbstractController
                 $em->exec("TRUNCATE TABLE {$table} RESTART IDENTITY CASCADE");
             } catch (\Exception $e) {
                 error_log("PostgreSQL Debug: TRUNCATE CASCADE failed for {$table}: " . $e->getMessage());
+                
+                // SQLSTATE[25P02]エラーの場合はトランザクションリセット
+                if (strpos($e->getMessage(), '25P02') !== false) {
+                    error_log("PostgreSQL Debug: 25P02 error detected, resetting transaction");
+                    $this->resetPostgreSQLTransaction($em);
+                }
                 // 一部のテーブルが存在しない場合は継続
             }
         }
@@ -2579,42 +2597,170 @@ class ConfigController extends AbstractController
     {
         error_log("PostgreSQL Debug: Phase 2 - INSERT in dependency order");
         
-        // 1. まず基本データとマスターデータ
-        $this->restoreEssentialData($em);
-        
-        // 2. 顧客データ
-        $this->saveToC($em, $csvDir, 'dtb_customer');
-        
-        // 3. 商品関連（依存関係順）
-        $this->saveToC($em, $csvDir, 'dtb_category');
-        $this->saveToC($em, $csvDir, 'dtb_class_name');
-        $this->saveToC($em, $csvDir, 'dtb_class_category');
-        $this->saveToC($em, $csvDir, 'dtb_product');
-        $this->saveToC($em, $csvDir, 'dtb_product_class');
-        $this->saveToC($em, $csvDir, 'dtb_product_stock');
-        $this->saveToC($em, $csvDir, 'dtb_product_image');
-        $this->saveToC($em, $csvDir, 'dtb_product_category');
-        
-        // 4. 配送・支払い関連
-        $this->saveToC($em, $csvDir, 'dtb_delivery');
-        $this->saveToC($em, $csvDir, 'dtb_delivery_fee');
-        $this->saveToC($em, $csvDir, 'dtb_delivery_time');
-        $this->saveToC($em, $csvDir, 'dtb_payment');
-        
-        // 5. 注文関連（最後）
-        $this->saveToO($em, $csvDir, 'dtb_order');
-        $this->saveToO($em, $csvDir, 'dtb_order_item');
-        $this->saveToO($em, $csvDir, 'dtb_shipping');
-        
-        if ($this->dataMigrationService->isVersion('4.0/4.1') || $this->dataMigrationService->isVersion('3')) {
-            $this->saveToO($em, $csvDir, 'dtb_mail_history');
-        } else {
-            $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
+        try {
+            // 1. まず基本データとマスターデータ
+            error_log("PostgreSQL Debug: Restoring essential data");
+            $this->restoreEssentialData($em);
+            
+            // 2. 顧客データ
+            error_log("PostgreSQL Debug: Inserting customer data");
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_customer');
+            });
+            
+            // 3. 商品関連（依存関係順）
+            error_log("PostgreSQL Debug: Inserting product-related data");
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_category');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_class_name');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_class_category');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_product');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_product_class');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_product_stock');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_product_image');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_product_category');
+            });
+            
+            // 4. 配送・支払い関連
+            error_log("PostgreSQL Debug: Inserting delivery and payment data");
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_delivery');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_delivery_fee');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_delivery_time');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToC($em, $csvDir, 'dtb_payment');
+            });
+            
+            // 5. 注文関連（最後）
+            error_log("PostgreSQL Debug: Inserting order data");
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToO($em, $csvDir, 'dtb_order');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToO($em, $csvDir, 'dtb_order_item');
+            });
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToO($em, $csvDir, 'dtb_shipping');
+            });
+            
+            if ($this->dataMigrationService->isVersion('4.0/4.1') || $this->dataMigrationService->isVersion('3')) {
+                $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                    $this->saveToO($em, $csvDir, 'dtb_mail_history');
+                });
+            } else {
+                $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                    $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
+                });
+            }
+            
+            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                $this->saveToO($em, $csvDir, 'dtb_tax_rule', null, true);
+            });
+            
+            error_log("PostgreSQL Debug: Phase 2 completed - All data inserted in dependency order");
+            
+        } catch (\Exception $e) {
+            error_log("PostgreSQL Debug: Error in insertInDependencyOrder - " . $e->getMessage());
+            $this->resetPostgreSQLTransaction($em);
+            throw $e;
         }
-        
-        $this->saveToO($em, $csvDir, 'dtb_tax_rule', null, true);
-        
-        error_log("PostgreSQL Debug: Phase 2 completed - All data inserted in dependency order");
+    }
+
+    /**
+     * PostgreSQLトランザクションエラー処理付きで処理を実行
+     */
+    private function executeWithTransactionReset($em, $operation)
+    {
+        try {
+            return $operation();
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            error_log("PostgreSQL Debug: Operation error: " . $errorMessage);
+            
+            // PostgreSQL特有のトランザクションエラー (SQLSTATE[25P02]) を検知
+            if (strpos($errorMessage, '25P02') !== false || 
+                strpos($errorMessage, 'current transaction is aborted') !== false) {
+                error_log("PostgreSQL Debug: Detected transaction abort error, resetting transaction");
+                $this->resetPostgreSQLTransaction($em);
+                
+                // トランザクションリセット後に再試行
+                try {
+                    return $operation();
+                } catch (\Exception $retryError) {
+                    error_log("PostgreSQL Debug: Retry after transaction reset failed: " . $retryError->getMessage());
+                    throw $retryError;
+                }
+            } else {
+                // その他のエラーはそのまま再スロー
+                throw $e;
+            }
+        }
+    }
+
+    /**
+     * PostgreSQLのトランザクション状態をリセット
+     */
+    private function resetPostgreSQLTransaction($em)
+    {
+        try {
+            if ($em->isTransactionActive()) {
+                error_log("PostgreSQL Debug: Rolling back active transaction");
+                $em->rollBack();
+            }
+            
+            // 新しいトランザクションを開始
+            if (!$em->isTransactionActive()) {
+                error_log("PostgreSQL Debug: Starting new transaction");
+                $em->beginTransaction();
+            }
+            
+        } catch (\Exception $e) {
+            error_log("PostgreSQL Debug: Transaction reset error: " . $e->getMessage());
+            
+            // 最後の手段：接続をクローズして再接続
+            try {
+                $em->close();
+                $em->connect();
+                if (!$em->isTransactionActive()) {
+                    $em->beginTransaction();
+                }
+                error_log("PostgreSQL Debug: Connection reset successful");
+            } catch (\Exception $reconnectError) {
+                error_log("PostgreSQL Debug: Connection reset failed: " . $reconnectError->getMessage());
+                throw $reconnectError;
+            }
+        }
     }
 
     /**
