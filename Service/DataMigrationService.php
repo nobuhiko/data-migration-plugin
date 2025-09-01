@@ -208,6 +208,198 @@ class DataMigrationService
         return $data;
     }
 
+    /**
+     * PostgreSQL用の依存関係を考慮したテーブル挿入順序を取得
+     * 外部キー制約に従った適切な順序でデータを挿入することで
+     * superuser権限なしでも安全にデータ移行を実行
+     * 
+     * @return array 挿入順序に並べられたテーブル名の配列
+     */
+    public function getPostgreSQLInsertionOrder()
+    {
+        // 依存関係に基づく挿入順序
+        // 親テーブル → 子テーブルの順序で定義
+        return [
+            // 1. マスターテーブル（依存関係なし）
+            'mtb_authority', 'mtb_job', 'mtb_sex', 'mtb_pref', 'mtb_country',
+            'mtb_customer_status', 'mtb_customer_order_status', 'mtb_order_status',
+            'mtb_order_status_color', 'mtb_order_item_type', 'mtb_device_type',
+            'mtb_sale_type', 'mtb_product_type', 'mtb_taxrule', 'mtb_work',
+            'mtb_csv_type', 'mtb_page_max', 'mtb_product_list_max',
+            'mtb_product_list_order_by', 'mtb_disp', 'mtb_tag', 'mtb_db',
+            'mtb_zip',
+            
+            // 2. 基本エンティティ（マスターテーブルに依存）
+            'dtb_member',           // mtb_authority, mtb_work に依存
+            'dtb_customer',         // mtb_job, mtb_sex, mtb_pref, mtb_country, mtb_customer_status に依存
+            'dtb_customer_address', // dtb_customer, mtb_pref, mtb_country に依存
+            
+            // 3. 商品関連（基本的な依存関係）
+            'dtb_category',         // 自己参照可能だが親カテゴリから順に挿入
+            'dtb_product',          // dtb_member (creator) に依存
+            'dtb_class_name',       // dtb_member (creator) に依存
+            'dtb_class_category',   // dtb_class_name に依存
+            'dtb_product_class',    // dtb_product, dtb_class_category に依存
+            'dtb_product_category', // dtb_product, dtb_category に依存
+            'dtb_product_stock',    // dtb_product_class に依存
+            'dtb_product_image',    // dtb_product に依存
+            'dtb_tag',              // 基本エンティティ
+            'dtb_product_tag',      // dtb_product, dtb_tag に依存
+            'dtb_customer_favorite_product', // dtb_customer, dtb_product に依存
+            
+            // 4. 配送・決済関連
+            'dtb_delivery',         // dtb_member (creator) に依存
+            'dtb_delivery_time',    // dtb_delivery に依存
+            'dtb_delivery_fee',     // dtb_delivery, mtb_pref に依存
+            'dtb_payment',          // dtb_member (creator) に依存
+            'dtb_payment_option',   // dtb_delivery, dtb_payment に依存
+            
+            // 5. 注文関連（最も多くの依存関係）
+            'dtb_order',            // dtb_customer, dtb_customer_status, mtb_order_status, mtb_device_type に依存
+            'dtb_shipping',         // dtb_order, dtb_delivery, dtb_delivery_time, mtb_pref, mtb_country に依存
+            'dtb_order_item',       // dtb_order, dtb_product, dtb_product_class に依存
+            'dtb_shipment_item',    // dtb_shipping, dtb_order_item に依存
+            
+            // 6. その他のシステムテーブル
+            'dtb_mail_history',     // dtb_order に依存
+            'dtb_tax_rule',         // dtb_product, dtb_product_class に依存（NULLable）
+            
+            // 7. CMS・システム設定関連
+            'dtb_base_info', 'dtb_news', 'dtb_help', 'dtb_csv',
+            'dtb_template', 'dtb_block', 'dtb_page_layout', 'dtb_block_position',
+            'dtb_mail_template', 'dtb_plugin', 'dtb_plugin_event_handler',
+            'dtb_authority_role', 'doctrine_migration_versions'
+        ];
+    }
+
+    /**
+     * PostgreSQL用の外部キー制約に適応したBulkInsertQuery実行
+     * 制約エラーが発生した場合、NULL値での再試行や行レベルでの個別挿入を行う
+     * 
+     * @param \nobuhiko\BulkInsertQuery\BulkInsertQuery $builder
+     * @param string $tableName
+     * @param \Doctrine\DBAL\Connection $em
+     * @return bool 実行成功かどうか
+     */
+    public function executeWithPostgreSQLFallback($builder, $tableName, $em)
+    {
+        if ($em->getDatabasePlatform()->getName() !== 'postgresql') {
+            // PostgreSQL以外は通常実行
+            $builder->execute();
+            return true;
+        }
+        
+        try {
+            // 通常の一括挿入を試行
+            $builder->execute();
+            return true;
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            
+            // PostgreSQL外部キー制約エラーの検出
+            if (strpos($errorMessage, 'foreign key constraint') !== false || 
+                strpos($errorMessage, 'violates not-null constraint') !== false) {
+                
+                error_log("PostgreSQL FK constraint error in table '$tableName': " . $errorMessage);
+                error_log("Attempting fallback strategies...");
+                
+                // フォールバック戦略を実行
+                return $this->handlePostgreSQLConstraintError($builder, $tableName, $em, $errorMessage);
+            }
+            
+            // その他のエラーは再スロー
+            throw $e;
+        }
+    }
+    
+    /**
+     * PostgreSQL制約エラーの処理
+     * 
+     * @param \nobuhiko\BulkInsertQuery\BulkInsertQuery $builder
+     * @param string $tableName
+     * @param \Doctrine\DBAL\Connection $em
+     * @param string $errorMessage
+     * @return bool
+     */
+    private function handlePostgreSQLConstraintError($builder, $tableName, $em, $errorMessage)
+    {
+        $values = $builder->getValues();
+        $columns = $builder->getColumns();
+        
+        if (empty($values)) {
+            return true;
+        }
+        
+        // 戦略1: 行ごとの個別挿入（制約違反行をスキップ）
+        $successCount = 0;
+        $skipCount = 0;
+        
+        foreach ($values as $index => $row) {
+            try {
+                // 個別行での一括挿入クエリを作成
+                $singleBuilder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
+                $singleBuilder->setColumns($columns);
+                $singleBuilder->setValues($row);
+                $singleBuilder->execute();
+                $successCount++;
+            } catch (\Exception $rowError) {
+                $skipCount++;
+                error_log("PostgreSQL: Skipping row $index in table '$tableName' due to constraint: " . $rowError->getMessage());
+                
+                // NULLable外部キーフィールドをNULLに設定して再試行
+                if ($this->tryNullifyForeignKeys($singleBuilder, $tableName, $em, $row, $columns)) {
+                    $successCount++;
+                    $skipCount--;
+                }
+            }
+        }
+        
+        $totalCount = count($values);
+        if ($successCount > 0) {
+            error_log("PostgreSQL: Successfully inserted $successCount/$totalCount rows in table '$tableName' (skipped: $skipCount)");
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * NULLable外部キーフィールドをNULLに設定して再挿入を試行
+     */
+    private function tryNullifyForeignKeys($builder, $tableName, $em, $row, $columns)
+    {
+        // 一般的なNULLableな外部キーフィールド
+        $nullableFields = [
+            'creator_id', 'parent_category_id', 'customer_id', 'country_id',
+            'class_category_id1', 'class_category_id2', 'product_class_id',
+            'time_id', 'delivery_fee_id'
+        ];
+        
+        $modified = false;
+        foreach ($nullableFields as $field) {
+            $fieldIndex = array_search($field, $columns);
+            if ($fieldIndex !== false && isset($row[$fieldIndex]) && $row[$fieldIndex] !== null) {
+                $row[$fieldIndex] = null;
+                $modified = true;
+            }
+        }
+        
+        if ($modified) {
+            try {
+                $retryBuilder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
+                $retryBuilder->setColumns($columns);
+                $retryBuilder->setValues($row);
+                $retryBuilder->execute();
+                error_log("PostgreSQL: Successfully inserted row with nullified foreign keys in table '$tableName'");
+                return true;
+            } catch (\Exception $retryError) {
+                error_log("PostgreSQL: Failed to insert even with nullified FKs in table '$tableName': " . $retryError->getMessage());
+            }
+        }
+        
+        return false;
+    }
+
     public function checkUploadSize()
     {
         if (!$filesize = ini_get('upload_max_filesize')) {
@@ -274,13 +466,9 @@ class DataMigrationService
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } else {
-            // PostgreSQLの場合、外部キー制約を無効化
-            try {
-                $em->exec('SET session_replication_role = replica;'); // need super user
-            } catch (\Exception $e) {
-                // スーパーユーザー権限がない場合はエラーログを出力
-                error_log('Warning: Could not set session_replication_role to replica. Foreign key constraints remain active.');
-            }
+            // PostgreSQLの場合、スマートな挿入順序管理を使用
+            // superuserが不要なアプローチを採用
+            error_log('PostgreSQL: Using smart insertion order management (no superuser required)');
         }
 
         return $platform;

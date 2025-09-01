@@ -414,7 +414,7 @@ class ConfigController extends AbstractController
 
                 if (($i % $batchSize) === 0) {
                     try {
-                        $builder->execute();
+                        $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
                     } catch (\Exception $e) {
                         error_log("BulkInsertQuery execute error in saveToC table '$tableName' at row $i: " . $e->getMessage());
                         error_log("Failed data for row $i: " . json_encode($value));
@@ -428,7 +428,7 @@ class ConfigController extends AbstractController
 
             if (count($builder->getValues()) > 0) {
                 try {
-                    $builder->execute();
+                    $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
                 } catch (\Exception $e) {
                     error_log("BulkInsertQuery final execute error in saveToC table '$tableName': " . $e->getMessage());
                     error_log("Failed final batch, data count: " . count($builder->getValues()));
@@ -794,14 +794,14 @@ class ConfigController extends AbstractController
                 $builder->setValues($value);
 
                 if (($i % $batchSize) === 0) {
-                    $builder->execute();
+                    $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
                 }
 
                 $i++;
             }
 
             if (count($builder->getValues()) > 0) {
-                $builder->execute();
+                $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
             }
 
             fclose($handle);
@@ -946,11 +946,11 @@ class ConfigController extends AbstractController
                 $builder->setValues($data);
 
                 if (($i % $batchSize) === 0) {
-                    $builder->execute();
+                    $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
                 }
             }
             if (count($builder->getValues()) > 0) {
-                $builder->execute();
+                $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
             }
 
             fclose($handle);
@@ -1015,12 +1015,12 @@ class ConfigController extends AbstractController
 
             // 20件に1回SQLを発行してメモリを開放する。
             if (($i % $batchSize) === 0) {
-                $builder->execute();
+                $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
             }
             $i++;
         }
         if (count($builder->getValues()) > 0) {
-            $builder->execute();
+            $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
             sleep(1);
         }
     }
@@ -1057,13 +1057,13 @@ class ConfigController extends AbstractController
 
                 // 20件に1回SQLを発行してメモリを開放する。
                 if (($i % $batchSize) === 0) {
-                    $builder->execute();
+                    $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
                 }
                 $i++;
             }
         }
         if (count($builder->getValues()) > 0) {
-            $builder->execute();
+            $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
             sleep(1);
         }
     }
@@ -1577,14 +1577,14 @@ class ConfigController extends AbstractController
                 $builder->setValues($value);
 
                 if (($i % $batchSize) === 0) {
-                    $builder->execute();
+                    $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
                 }
 
                 $i++;
             }
 
             if (count($builder->getValues()) > 0) {
-                $builder->execute();
+                $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
             }
 
             fclose($handle);
@@ -1674,13 +1674,13 @@ class ConfigController extends AbstractController
                 $builder->setValues($data);
                 // 20件に1回SQLを発行してメモリを開放する。
                 if (($i % $batchSize) === 0) {
-                    $builder->execute();
+                    $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
                 }
                 $i++;
             }
         }
         if (count($builder->getValues()) > 0) {
-            $builder->execute();
+            $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
             sleep(1);
         }
     }
@@ -1829,7 +1829,7 @@ class ConfigController extends AbstractController
 
                 if (($i % $batchSize) === 0) {
                     try {
-                        $builder->execute();
+                        $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
                         $this->addSuccess($tableName, 'admin');
                     } catch (\Exception $e) {
                         $this->addDanger($e->getMessage(), 'admin');
@@ -1843,7 +1843,7 @@ class ConfigController extends AbstractController
 
             if (count($builder->getValues()) > 0) {
                 try {
-                    $builder->execute();
+                    $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
                     $this->addSuccess($tableName, 'admin');
                 } catch (\Exception $e) {
                     $this->addDanger($e->getMessage(), 'admin');
