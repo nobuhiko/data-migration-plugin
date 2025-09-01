@@ -13,12 +13,14 @@ use Symfony\Component\Routing\Annotation\Route;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Template;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 class ConfigController extends AbstractController
 {
     /** @var pluginService */
     protected $pluginService;
     protected $dataMigrationService;
+    protected $parameterBag;
 
     /** @var array */
     protected $tax_rule = [];
@@ -56,10 +58,12 @@ class ConfigController extends AbstractController
      */
     public function __construct(
         PluginService $pluginService,
-        DataMigrationService $dataMigrationService
+        DataMigrationService $dataMigrationService,
+        ParameterBagInterface $parameterBag
     ) {
         $this->pluginService = $pluginService;
         $this->dataMigrationService = $dataMigrationService;
+        $this->parameterBag = $parameterBag;
     }
 
     /**
@@ -84,11 +88,11 @@ class ConfigController extends AbstractController
 
         if ($form->isSubmitted() && $form->isValid()) {
             $this->em = $em;
-            
+
             // PostgreSQL対応: 接続とプラットフォーム情報を取得
             $connection = $em; // $emは既にConnectionオブジェクト
             $platform = $connection->getDatabasePlatform()->getName();
-            
+
             // PostgreSQL対応: トランザクション状態をクリア
             if ($platform === 'postgresql') {
                 try {
@@ -172,7 +176,7 @@ class ConfigController extends AbstractController
 
             // .envのECCUBE_AUTH_MAGICを書き換える
             $this->dataMigrationService->updateEnv($form['auth_magic']->getData());
-            
+
                 // PostgreSQL対応: トランザクションをコミット
                 if ($platform === 'postgresql') {
                     try {
@@ -194,10 +198,10 @@ class ConfigController extends AbstractController
 
                 // 存在しないルート名を修正
                 return $this->redirectToRoute('data_migration43_admin_config');
-                
+
             } catch (\Exception $migrationError) {
                 error_log("PostgreSQL: Migration error occurred: " . $migrationError->getMessage());
-                
+
                 // PostgreSQL対応: エラー時のトランザクションロールバック
                 if ($platform === 'postgresql') {
                     try {
@@ -209,7 +213,7 @@ class ConfigController extends AbstractController
                         error_log("PostgreSQL: Error during rollback: " . $rollbackError->getMessage());
                     }
                 }
-                
+
                 // エラーメッセージを設定してリダイレクト
                 $this->addError('data_migration43.migration.error', 'admin');
                 return $this->redirectToRoute('data_migration43_admin_config');
@@ -234,7 +238,23 @@ class ConfigController extends AbstractController
     private function saveCustomerAndOrder($em, $csvDir)
     {
         $platform = $this->dataMigrationService->begin($em);
+        
+        // デバッグ：platform判定を確認
+        error_log("PostgreSQL Debug: Platform detected as: '$platform'");
+        file_put_contents('/tmp/platform_debug.txt', date('Y-m-d H:i:s') . " - Platform: '$platform'" . PHP_EOL, FILE_APPEND);
 
+        // PostgreSQL用の2フェーズ処理を使用
+        if ($platform === 'postgresql') {
+            error_log("PostgreSQL Debug: Using two-phase process instead of individual table processing");
+            file_put_contents('/tmp/two_phase_process_called.txt', date('Y-m-d H:i:s') . ' - Two-phase process started' . PHP_EOL, FILE_APPEND);
+            $this->executePostgreSQLTwoPhaseProcess($em, $csvDir);
+            
+            // PostgreSQL用処理完了後の後処理
+            $this->finalizePostgreSQLProcess($em, $platform);
+            return;
+        }
+
+        // 従来の処理（MySQL等）
         // 会員
         $this->saveToC($em, $csvDir, 'dtb_customer');
 
@@ -303,6 +323,21 @@ class ConfigController extends AbstractController
         if (file_exists($csvDir . 'dtb_customer.csv') && filesize($csvDir . 'dtb_customer.csv') > 0) {
 
             $platform = $this->dataMigrationService->begin($em);
+            
+            // デバッグ：platform判定を確認
+            error_log("PostgreSQL Debug: saveCustomer - Platform detected as: '$platform'");
+            file_put_contents('/tmp/platform_debug.txt', date('Y-m-d H:i:s') . " - saveCustomer Platform: '$platform'" . PHP_EOL, FILE_APPEND);
+
+            // PostgreSQL用の2フェーズ処理を使用
+            if ($platform === 'postgresql') {
+                error_log("PostgreSQL Debug: saveCustomer - Using two-phase process");
+                file_put_contents('/tmp/two_phase_process_called.txt', date('Y-m-d H:i:s') . ' - saveCustomer two-phase process started' . PHP_EOL, FILE_APPEND);
+                $this->executePostgreSQLTwoPhaseProcess($em, $csvDir);
+                
+                // PostgreSQL用処理完了後の後処理
+                $this->finalizePostgreSQLProcess($em, $platform);
+                return;
+            }
 
             $this->saveToC($em, $csvDir, 'mtb_job', null, true);
             $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
@@ -552,11 +587,11 @@ class ConfigController extends AbstractController
     {
         $connection = $em;
         $platform = $connection->getDatabasePlatform()->getName();
-        
+
         if ($platform !== 'postgresql') {
             return $tables; // PostgreSQL以外はそのまま
         }
-        
+
         try {
             // 外部キー制約情報を取得
             $sql = "
@@ -564,70 +599,70 @@ class ConfigController extends AbstractController
                     tc.table_name AS child_table,
                     ccu.table_name AS parent_table
                 FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage kcu 
+                JOIN information_schema.key_column_usage kcu
                     ON tc.constraint_name = kcu.constraint_name
-                JOIN information_schema.constraint_column_usage ccu 
+                JOIN information_schema.constraint_column_usage ccu
                     ON ccu.constraint_name = tc.constraint_name
                 WHERE tc.constraint_type = 'FOREIGN KEY'
                     AND tc.table_schema = 'public'
             ";
-            
+
             $foreignKeys = $connection->fetchAllAssociative($sql);
-            
+
             // 依存関係マップを構築
             $dependencies = [];
             foreach ($foreignKeys as $fk) {
                 $child = $fk['child_table'];
                 $parent = $fk['parent_table'];
-                
+
                 // 自己参照は無視
                 if ($child !== $parent) {
                     $dependencies[$child][] = $parent;
                 }
             }
-            
+
             // トポロジカルソート
             $sorted = [];
             $processed = [];
             $processing = [];
-            
+
             $visit = function($table) use (&$visit, &$dependencies, &$sorted, &$processed, &$processing, $tables) {
                 if (isset($processed[$table]) || !in_array($table, $tables)) {
                     return;
                 }
-                
+
                 if (isset($processing[$table])) {
                     // 循環依存を検出したが、処理を継続
                     return;
                 }
-                
+
                 $processing[$table] = true;
-                
+
                 if (isset($dependencies[$table])) {
                     foreach ($dependencies[$table] as $dependency) {
                         $visit($dependency);
                     }
                 }
-                
+
                 unset($processing[$table]);
                 $processed[$table] = true;
                 $sorted[] = $table;
             };
-            
+
             foreach ($tables as $table) {
                 $visit($table);
             }
-            
+
             // 処理されなかったテーブルを最後に追加
             foreach ($tables as $table) {
                 if (!in_array($table, $sorted)) {
                     $sorted[] = $table;
                 }
             }
-            
+
             error_log("PostgreSQL: Optimized table order: " . implode(' -> ', $sorted));
             return $sorted;
-            
+
         } catch (\Exception $e) {
             error_log("PostgreSQL: Error determining table order, using original: " . $e->getMessage());
             return $tables;
@@ -1355,7 +1390,7 @@ class ConfigController extends AbstractController
             if ($customerCountAfterMasters == 0) {
                 error_log("PostgreSQL Debug: dtb_customer was deleted by CASCADE, re-processing customer data");
                 $this->saveToC($em, $csvDir, 'dtb_customer');
-                
+
                 $customerCountFinal = $em->fetchOne('SELECT COUNT(*) FROM dtb_customer');
                 error_log("PostgreSQL Debug: Final customer count after re-processing: $customerCountFinal");
             }
@@ -1426,19 +1461,19 @@ class ConfigController extends AbstractController
             // PostgreSQL: dtb_tax_rule処理後にdtb_product_classが削除された場合の復旧処理
             $productClassCountAfterTax = $em->fetchOne('SELECT COUNT(*) FROM dtb_product_class');
             error_log("PostgreSQL Debug: After dtb_tax_rule - dtb_product_class count: $productClassCountAfterTax");
-            
+
             if ($productClassCountAfterTax == 0) {
                 error_log("PostgreSQL Debug: dtb_product_class was deleted by dtb_tax_rule CASCADE, re-processing product data");
-                
+
                 // 商品関連CSVファイルの確認
                 $productCsv = $csvDir . 'dtb_product.csv';
                 $productClassCsv = $csvDir . 'dtb_product_class.csv';
                 $productClassCsv2 = $csvDir . 'dtb_products_class.csv'; // 古いバージョン用
-                
+
                 error_log("PostgreSQL Debug: Checking product CSV files - dtb_product.csv: " . (file_exists($productCsv) ? "exists" : "missing"));
                 error_log("PostgreSQL Debug: Checking product CSV files - dtb_product_class.csv: " . (file_exists($productClassCsv) ? "exists" : "missing"));
                 error_log("PostgreSQL Debug: Checking product CSV files - dtb_products_class.csv: " . (file_exists($productClassCsv2) ? "exists" : "missing"));
-                
+
                 // バージョンに応じた復旧処理
                 if ($this->dataMigrationService->isVersion('4.0/4.1') || $this->dataMigrationService->isVersion('3')) {
                     if (file_exists($productCsv)) {
@@ -1456,7 +1491,7 @@ class ConfigController extends AbstractController
                         $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');
                     }
                 }
-                
+
                 $productClassCountFinal = $em->fetchOne('SELECT COUNT(*) FROM dtb_product_class');
                 $productCountFinal = $em->fetchOne('SELECT COUNT(*) FROM dtb_product');
                 error_log("PostgreSQL Debug: After product recovery - dtb_product: $productCountFinal, dtb_product_class: $productClassCountFinal");
@@ -1514,7 +1549,7 @@ class ConfigController extends AbstractController
 
             // PostgreSQL: 移行後の基本データ復旧処理
             $this->restoreEssentialData($em);
-            
+
             // PostgreSQL: 全マスタテーブルの存在チェック
             $this->checkAllMasterTables($em);
 
@@ -2303,29 +2338,29 @@ class ConfigController extends AbstractController
     private function restoreEssentialData($em)
     {
         error_log("PostgreSQL Debug: Starting essential data restoration from CSV");
-        
+        file_put_contents('/tmp/restore_essential_data_called.txt', date('Y-m-d H:i:s') . ' - restoreEssentialData called' . PHP_EOL, FILE_APPEND);
+
         // CSVディレクトリのパスを取得（saveOrderメソッドと同じ方法）
-        $container = self::getContainer();
-        $cacheDir = $container->getParameter('kernel.cache_dir');
+        $cacheDir = $this->parameterBag->get('kernel.cache_dir');
         $csvDir = $cacheDir . '/Plugin/' . substr(sha1(__FILE__), 0, 8) . '/';
-        
+
         try {
             // 1. dtb_base_info の確認・復旧
             $baseInfoCount = $em->fetchOne('SELECT COUNT(*) FROM dtb_base_info');
             error_log("PostgreSQL Debug: dtb_base_info count: $baseInfoCount");
-            
+
             if ($baseInfoCount == 0) {
                 error_log("PostgreSQL Debug: Restoring dtb_base_info from CSV");
                 $this->restoreFromCSV($em, $csvDir, 'dtb_base_info');
             }
-            
+
             // 2. mtb_authority の確認・復旧（移行対象データなのでCSVから復旧）
             $authorityCount = $em->fetchOne('SELECT COUNT(*) FROM mtb_authority');
             if ($authorityCount == 0) {
                 error_log("PostgreSQL Debug: Restoring mtb_authority from CSV");
                 $this->restoreFromCSV($em, $csvDir, 'mtb_authority');
             }
-            
+
             // 3. mtb_country の確認・復旧（元のデータを復旧）
             $countryCount = $em->fetchOne('SELECT COUNT(*) FROM mtb_country');
             if ($countryCount == 0) {
@@ -2336,7 +2371,7 @@ class ConfigController extends AbstractController
                     $em->exec("INSERT INTO mtb_country (id, name, sort_no, discriminator_type) VALUES (392, '日本', 1, 'country')");
                 }
             }
-            
+
             // 4. mtb_rounding_type の確認・復旧
             $roundingCount = $em->fetchOne('SELECT COUNT(*) FROM mtb_rounding_type');
             if ($roundingCount == 0) {
@@ -2349,12 +2384,12 @@ class ConfigController extends AbstractController
                     $em->exec("INSERT INTO mtb_rounding_type (id, name, sort_no, discriminator_type) VALUES (3, '切り上げ', 3, 'rounding')");
                 }
             }
-            
+
         } catch (\Exception $e) {
             error_log("PostgreSQL Debug: Essential data restoration error: " . $e->getMessage());
             // エラーが発生してもデータ移行処理は継続
         }
-        
+
         error_log("PostgreSQL Debug: Essential data restoration completed");
     }
 
@@ -2364,21 +2399,21 @@ class ConfigController extends AbstractController
     private function restoreFromCSV($em, $csvDir, $tableName)
     {
         $csvFile = $csvDir . $tableName . '.csv';
-        
+
         if (!file_exists($csvFile)) {
             error_log("PostgreSQL Debug: CSV file not found: $csvFile");
             return false;
         }
-        
+
         try {
             error_log("PostgreSQL Debug: Restoring $tableName from CSV: $csvFile");
-            
+
             // CSVファイルを読み込み
             if (($handle = fopen($csvFile, 'r')) === false) {
                 error_log("PostgreSQL Debug: Cannot open CSV file: $csvFile");
                 return false;
             }
-            
+
             // ヘッダー行を読み込み
             $header = fgetcsv($handle);
             if ($header === false) {
@@ -2386,22 +2421,22 @@ class ConfigController extends AbstractController
                 error_log("PostgreSQL Debug: Cannot read CSV header: $csvFile");
                 return false;
             }
-            
+
             $restoredCount = 0;
             while (($row = fgetcsv($handle)) !== false) {
                 if (count($row) !== count($header)) {
                     continue; // スキップ
                 }
-                
+
                 $data = array_combine($header, $row);
                 $data = $this->dataMigrationService->convertNULL($data);
-                
+
                 // INSERT文を構築
                 $columns = implode(', ', array_keys($data));
                 $placeholders = ':' . implode(', :', array_keys($data));
-                
+
                 $sql = "INSERT INTO $tableName ($columns) VALUES ($placeholders)";
-                
+
                 try {
                     $stmt = $em->prepare($sql);
                     foreach ($data as $key => $value) {
@@ -2414,12 +2449,12 @@ class ConfigController extends AbstractController
                     // 個別のINSERTエラーは継続
                 }
             }
-            
+
             fclose($handle);
             error_log("PostgreSQL Debug: Restored $restoredCount records for $tableName from CSV");
-            
+
             return $restoredCount > 0;
-            
+
         } catch (\Exception $e) {
             error_log("PostgreSQL Debug: CSV restoration error for $tableName: " . $e->getMessage());
             return false;
@@ -2432,47 +2467,211 @@ class ConfigController extends AbstractController
     private function checkAllMasterTables($em)
     {
         error_log("PostgreSQL Debug: Starting master table existence check");
-        
+
         try {
             // mtb_で始まる全テーブルを取得
             $masterTables = $em->fetchAllAssociative("
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name LIKE 'mtb_%' 
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name LIKE 'mtb_%'
                 ORDER BY table_name
             ");
-            
+
             $emptyTables = [];
             $totalTables = count($masterTables);
             $emptyCount = 0;
-            
+
             foreach ($masterTables as $table) {
                 $tableName = $table['table_name'];
                 $count = $em->fetchOne("SELECT COUNT(*) FROM {$tableName}");
-                
+
                 if ($count == 0) {
                     $emptyTables[] = $tableName;
                     $emptyCount++;
                 }
-                
+
                 error_log("PostgreSQL Debug: {$tableName}: {$count} records");
             }
-            
+
             error_log("PostgreSQL Debug: Master table check summary - Total: {$totalTables}, Empty: {$emptyCount}");
-            
+
             if ($emptyCount > 0) {
                 error_log("PostgreSQL Debug: Empty master tables: " . implode(', ', $emptyTables));
                 $this->addDanger("警告: 以下のマスタテーブルが空です: " . implode(', ', $emptyTables), 'admin');
             } else {
                 $this->addSuccess("全てのマスタテーブル({$totalTables}個)にデータが存在します", 'admin');
             }
-            
+
             return ['total' => $totalTables, 'empty' => $emptyCount, 'emptyTables' => $emptyTables];
-            
+
         } catch (\Exception $e) {
             error_log("PostgreSQL Debug: Master table check error: " . $e->getMessage());
             return ['total' => 0, 'empty' => 0, 'emptyTables' => []];
+        }
+    }
+
+    /**
+     * PostgreSQL向け2フェーズ処理：まず全テーブルをTRUNCATE CASCADE、その後依存関係順でINSERT
+     */
+    private function executePostgreSQLTwoPhaseProcess($em, $csvDir)
+    {
+        error_log("PostgreSQL Debug: Starting two-phase process (TRUNCATE then INSERT)");
+        
+        // Phase 1: TRUNCATE CASCADE all target tables
+        $this->truncateAllTargetTables($em);
+        
+        // Phase 2: INSERT in dependency order
+        $this->insertInDependencyOrder($em, $csvDir);
+        
+        error_log("PostgreSQL Debug: Two-phase process completed");
+    }
+
+    /**
+     * Phase 1: 対象テーブルを全て TRUNCATE CASCADE でクリア
+     */
+    private function truncateAllTargetTables($em)
+    {
+        error_log("PostgreSQL Debug: Phase 1 - TRUNCATE CASCADE all target tables");
+        
+        // 移行対象テーブルリスト（依存関係を考慮した順序）
+        $targetTables = [
+            'dtb_customer',
+            'dtb_product',
+            'dtb_product_class',
+            'dtb_product_stock',
+            'dtb_product_image',
+            'dtb_product_category',
+            'dtb_category',
+            'dtb_class_category',
+            'dtb_class_name',
+            'dtb_delivery',
+            'dtb_delivery_fee',
+            'dtb_delivery_time',
+            'dtb_payment',
+            'dtb_order',
+            'dtb_order_item',
+            'dtb_shipping',
+            'dtb_mail_history',
+            'dtb_tax_rule',
+            // 必要なマスターテーブル
+            'mtb_authority',
+            'dtb_base_info'
+        ];
+        
+        foreach ($targetTables as $table) {
+            try {
+                error_log("PostgreSQL Debug: TRUNCATE CASCADE {$table}");
+                $em->exec("TRUNCATE TABLE {$table} RESTART IDENTITY CASCADE");
+            } catch (\Exception $e) {
+                error_log("PostgreSQL Debug: TRUNCATE CASCADE failed for {$table}: " . $e->getMessage());
+                // 一部のテーブルが存在しない場合は継続
+            }
+        }
+        
+        error_log("PostgreSQL Debug: Phase 1 completed - All target tables truncated");
+    }
+
+    /**
+     * Phase 2: 依存関係順にINSERTを実行
+     */
+    private function insertInDependencyOrder($em, $csvDir)
+    {
+        error_log("PostgreSQL Debug: Phase 2 - INSERT in dependency order");
+        
+        // 1. まず基本データとマスターデータ
+        $this->restoreEssentialData($em);
+        
+        // 2. 顧客データ
+        $this->saveToC($em, $csvDir, 'dtb_customer');
+        
+        // 3. 商品関連（依存関係順）
+        $this->saveToC($em, $csvDir, 'dtb_category');
+        $this->saveToC($em, $csvDir, 'dtb_class_name');
+        $this->saveToC($em, $csvDir, 'dtb_class_category');
+        $this->saveToC($em, $csvDir, 'dtb_product');
+        $this->saveToC($em, $csvDir, 'dtb_product_class');
+        $this->saveToC($em, $csvDir, 'dtb_product_stock');
+        $this->saveToC($em, $csvDir, 'dtb_product_image');
+        $this->saveToC($em, $csvDir, 'dtb_product_category');
+        
+        // 4. 配送・支払い関連
+        $this->saveToC($em, $csvDir, 'dtb_delivery');
+        $this->saveToC($em, $csvDir, 'dtb_delivery_fee');
+        $this->saveToC($em, $csvDir, 'dtb_delivery_time');
+        $this->saveToC($em, $csvDir, 'dtb_payment');
+        
+        // 5. 注文関連（最後）
+        $this->saveToO($em, $csvDir, 'dtb_order');
+        $this->saveToO($em, $csvDir, 'dtb_order_item');
+        $this->saveToO($em, $csvDir, 'dtb_shipping');
+        
+        if ($this->dataMigrationService->isVersion('4.0/4.1') || $this->dataMigrationService->isVersion('3')) {
+            $this->saveToO($em, $csvDir, 'dtb_mail_history');
+        } else {
+            $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
+        }
+        
+        $this->saveToO($em, $csvDir, 'dtb_tax_rule', null, true);
+        
+        error_log("PostgreSQL Debug: Phase 2 completed - All data inserted in dependency order");
+    }
+
+    /**
+     * PostgreSQL処理完了後の後処理
+     */
+    private function finalizePostgreSQLProcess($em, $platform)
+    {
+        error_log("PostgreSQL Debug: Starting finalization process");
+        
+        try {
+            // ID Sequenceの設定
+            $this->dataMigrationService->setIdSeq($em, 'dtb_order');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_order_item');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_shipping');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_payment');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_delivery');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_delivery_fee');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_delivery_time');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_tax_rule');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_mail_history');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_customer');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_product');
+            $this->dataMigrationService->setIdSeq($em, 'dtb_product_class');
+            
+            // 注文ステータスのクリーンアップ
+            error_log("PostgreSQL Debug: Executing order status cleanup");
+            try {
+                $updateCount = $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
+                error_log("PostgreSQL Debug: Updated $updateCount orders with invalid status");
+            } catch (\Exception $e) {
+                error_log("PostgreSQL Debug: UPDATE failed for order status cleanup, skipping: " . $e->getMessage());
+            }
+            
+            // 全マスタテーブルの存在チェック
+            $this->checkAllMasterTables($em);
+            
+            // PostgreSQL用のコミット処理
+            try {
+                error_log("PostgreSQL Debug: Committing two-phase transaction");
+                $em->commit();
+                error_log("PostgreSQL Debug: Two-phase transaction committed successfully");
+            } catch (\Exception $commitError) {
+                error_log("PostgreSQL Debug: Commit failed: " . $commitError->getMessage());
+                try {
+                    $em->rollBack();
+                    error_log("PostgreSQL Debug: Transaction rolled back after commit failure");
+                } catch (\Exception $rollbackError) {
+                    error_log("PostgreSQL Debug: Rollback also failed: " . $rollbackError->getMessage());
+                }
+                throw $commitError;
+            }
+            
+            error_log("PostgreSQL Debug: Finalization completed successfully");
+            
+        } catch (\Exception $e) {
+            error_log("PostgreSQL Debug: Finalization error: " . $e->getMessage());
+            throw $e;
         }
     }
 }

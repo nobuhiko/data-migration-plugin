@@ -88,15 +88,26 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                     // EntityManagerをクリアして新しい状態でSELECTクエリを実行
                     $this->entityManager->clear();
                     
+                    // 新しい接続を強制的に確立してクリーンな状態にする
+                    $connection->close();
+                    $connection->connect();
+                    
                     // 新しいトランザクションを開始
-                    if (!$connection->isTransactionActive()) {
-                        $connection->beginTransaction();
-                    }
+                    $connection->beginTransaction();
                 } catch (\Exception $txError) {
                     // トランザクションエラーをログに記録
                     error_log("PostgreSQL test transaction reset error: " . $txError->getMessage());
-                    // EntityManagerをクリアしてクリーンな状態にする
-                    $this->entityManager->clear();
+                    try {
+                        // EntityManagerをクリアしてクリーンな状態にする
+                        $this->entityManager->clear();
+                        // 接続を再確立
+                        $connection->close();
+                        $connection->connect();
+                        $connection->beginTransaction();
+                    } catch (\Exception $reconnectError) {
+                        error_log("PostgreSQL test connection reset failed: " . $reconnectError->getMessage());
+                        $this->entityManager->clear();
+                    }
                 }
             }
             
