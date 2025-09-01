@@ -286,10 +286,19 @@ class ConfigController extends AbstractController
         $tableName = ($tableName) ? $tableName : $csvName;
         $this->dataMigrationService->resetTable($em, $tableName);
 
-        if (file_exists($tmpDir . $csvName . '.csv') == false) {
+        $fullPath = $tmpDir . $csvName . '.csv';
+        error_log("PostgreSQL Debug: saveToC looking for CSV file: $fullPath (table: $tableName)");
+        
+        if (file_exists($fullPath) == false) {
+            error_log("PostgreSQL Debug: CSV file NOT FOUND: $fullPath");
+            // デバッグ：同じディレクトリのファイル一覧を表示
+            $files = glob($tmpDir . '*.csv');
+            error_log("PostgreSQL Debug: Available CSV files in $tmpDir: " . implode(', ', $files));
             // 無視する
             //$this->addDanger($csvName.'.csv が見つかりませんでした' , 'admin');
             return;
+        } else {
+            error_log("PostgreSQL Debug: CSV file found successfully: $fullPath");
         }
         if (filesize($tmpDir . $csvName . '.csv') == 0) {
             // 無視する

@@ -658,8 +658,8 @@ class DataMigrationService
                     error_log("PostgreSQL Debug Row: count=" . count($row) . ", data=[" . implode('|', $row) . "], first='" . (isset($row[0]) ? $row[0] : 'NULL') . "'");
                 }
                 
-                //空白行のときはテーブル変更
-                if (count($row) <= 1 and $row[0] == '') {
+                //空白行のときはテーブル変更（より厳密な判定）
+                if (count($row) <= 1 && (empty($row) || trim($row[0]) === '')) {
                     $tbl_flg = false;
                     $col_flg = false;
                     $enablePoint = false;
