@@ -463,22 +463,29 @@ class ConfigController extends AbstractController
             if ($this->dataMigrationService->isVersion('4.0/4.1')) {
                 $this->saveToC($em, $csvDir, 'mtb_product_status', null, true);
                 $this->saveToC($em, $csvDir, 'mtb_sale_type', null, true);
+                // PostgreSQL dependency order fix: process in correct dependency order
                 $this->saveToP($em, $csvDir, 'dtb_product');
+                $this->saveToP($em, $csvDir, 'dtb_category'); // Process category before product_category
                 $this->saveToO($em, $csvDir, 'dtb_delivery_duration', null, true);
-                $this->saveToP($em, $csvDir, 'dtb_product_class');
-                $this->saveToP($em, $csvDir, 'dtb_class_category');
+                // Process class tables in dependency order: class_name -> class_category -> product_class
                 $this->saveToP($em, $csvDir, 'dtb_class_name');
+                $this->saveToP($em, $csvDir, 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_product_class');
                 $this->saveToP($em, $csvDir, 'dtb_product_category');
                 $this->saveToP($em, $csvDir, 'dtb_product_stock');
                 $this->saveToP($em, $csvDir, 'dtb_product_image');
+                // Process tag before product_tag for dependency order
                 $this->saveToP($em, $csvDir, 'dtb_tag');
                 $this->saveToP($em, $csvDir, 'dtb_product_tag');
                 $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
             } else if ($this->dataMigrationService->isVersion('3')) {
+                // PostgreSQL dependency order fix: process in correct dependency order
                 $this->saveToP($em, $csvDir, 'dtb_product');
-                $this->saveToP($em, $csvDir, 'dtb_product_class');
-                $this->saveToP($em, $csvDir, 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_category'); // Process category before product_category
+                // Process class tables in dependency order: class_name -> class_category -> product_class
                 $this->saveToP($em, $csvDir, 'dtb_class_name');
+                $this->saveToP($em, $csvDir, 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_product_class');
                 $this->saveToP($em, $csvDir, 'dtb_product_category');
                 $this->saveToP($em, $csvDir, 'dtb_product_stock');
                 $this->saveToP($em, $csvDir, 'dtb_product_image');
@@ -486,10 +493,13 @@ class ConfigController extends AbstractController
                 $this->saveToP($em, $csvDir, 'mtb_tag', 'dtb_tag');
                 $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
             } else {
+                // PostgreSQL dependency order fix: process in correct dependency order
                 $this->saveToP($em, $csvDir, 'dtb_products', 'dtb_product');
-                $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');
-                $this->saveToP($em, $csvDir, 'dtb_classcategory', 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_category'); // Process category before product_category
+                // Process class tables in dependency order: class_name -> class_category -> product_class
                 $this->saveToP($em, $csvDir, 'dtb_class', 'dtb_class_name');
+                $this->saveToP($em, $csvDir, 'dtb_classcategory', 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');
                 $this->saveToP($em, $csvDir, 'dtb_product_categories', 'dtb_product_category');
                 $this->saveToP($em, $csvDir, 'dtb_product_status', 'dtb_product_tag');
                 $this->saveToP($em, $csvDir, 'mtb_status', 'dtb_tag');
@@ -502,7 +512,7 @@ class ConfigController extends AbstractController
                 $this->saveProductImage($em);
             }
 
-            $this->saveToP($em, $csvDir, 'dtb_category');
+            // dtb_category is now processed earlier in correct dependency order
             if (file_exists($csvDir . 'mtb_product_type.csv')) {
                 $this->saveToP($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
             }
