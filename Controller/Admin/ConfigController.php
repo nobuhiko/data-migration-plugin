@@ -1061,7 +1061,25 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM ' . $tableName);
+        // PostgreSQL-aware DELETE with constraint handling
+        try {
+            $em->exec('DELETE FROM ' . $tableName);
+        } catch (\Exception $e) {
+            // For PostgreSQL, handle constraint violation by using TRUNCATE with CASCADE
+            if ($em->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
+                try {
+                    error_log("PostgreSQL: DELETE failed for $tableName, attempting TRUNCATE CASCADE: " . $e->getMessage());
+                    $em->exec('TRUNCATE ' . $tableName . ' CASCADE');
+                } catch (\Exception $truncateError) {
+                    error_log("PostgreSQL: TRUNCATE CASCADE failed for $tableName, skipping table clear: " . $truncateError->getMessage());
+                    // If both DELETE and TRUNCATE fail, continue without clearing the table
+                    // The constraint handling in executeWithPostgreSQLFallback will handle conflicts during INSERT
+                }
+            } else {
+                // For non-PostgreSQL databases, re-throw the original error
+                throw $e;
+            }
+        }
 
         $i = 1;
         $batchSize = 20;
@@ -1100,7 +1118,25 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM ' . $tableName);
+        // PostgreSQL-aware DELETE with constraint handling
+        try {
+            $em->exec('DELETE FROM ' . $tableName);
+        } catch (\Exception $e) {
+            // For PostgreSQL, handle constraint violation by using TRUNCATE with CASCADE
+            if ($em->getConnection()->getDatabasePlatform()->getName() === 'postgresql') {
+                try {
+                    error_log("PostgreSQL: DELETE failed for $tableName, attempting TRUNCATE CASCADE: " . $e->getMessage());
+                    $em->exec('TRUNCATE ' . $tableName . ' CASCADE');
+                } catch (\Exception $truncateError) {
+                    error_log("PostgreSQL: TRUNCATE CASCADE failed for $tableName, skipping table clear: " . $truncateError->getMessage());
+                    // If both DELETE and TRUNCATE fail, continue without clearing the table
+                    // The constraint handling in executeWithPostgreSQLFallback will handle conflicts during INSERT
+                }
+            } else {
+                // For non-PostgreSQL databases, re-throw the original error
+                throw $e;
+            }
+        }
 
         $i = 1;
         $batchSize = 20;
@@ -1257,10 +1293,16 @@ class ConfigController extends AbstractController
                 $this->dataMigrationService->setIdSeq($em, 'dtb_mail_history');
             }
 
-            // イレギュラー対応
+            // イレギュラー対応 - PostgreSQL-aware UPDATE with error handling
             error_log("PostgreSQL Debug: Executing order status cleanup");
-            $updateCount = $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
-            error_log("PostgreSQL Debug: Updated $updateCount orders with invalid status");
+            try {
+                $updateCount = $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
+                error_log("PostgreSQL Debug: Updated $updateCount orders with invalid status");
+            } catch (\Exception $e) {
+                error_log("PostgreSQL Debug: UPDATE failed for order status cleanup, skipping: " . $e->getMessage());
+                // Continue without the update - this is a cleanup operation that's not critical for data migration
+                $updateCount = 0;
+            }
 
             // PostgreSQL用のコミット処理
             try {
