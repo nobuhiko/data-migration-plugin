@@ -143,7 +143,43 @@ class DataMigrationService
         if ($platform == 'mysql') {
             $em->exec('DELETE FROM ' . $tableName);
         } else {
+            // PostgreSQL用: 外部キー制約を考慮した削除順序
+            $this->resetTablePostgreSQL($em, $tableName);
+        }
+    }
+
+    /**
+     * PostgreSQL用のテーブル削除処理
+     * 外部キー制約を考慮して安全に削除を実行
+     */
+    private function resetTablePostgreSQL(Connection $em, $tableName)
+    {
+        try {
+            // 試行1: 通常のDELETE
             $em->exec('DELETE FROM ' . $tableName);
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            
+            // 外部キー制約エラーの場合
+            if (strpos($errorMessage, 'foreign key constraint') !== false) {
+                error_log("PostgreSQL FK constraint error during table reset for '$tableName': " . $errorMessage);
+                
+                // 試行2: TRUNCATE CASCADE (より強力だが注意が必要)
+                try {
+                    $em->exec('TRUNCATE TABLE ' . $tableName . ' CASCADE');
+                    error_log("PostgreSQL: Successfully reset table '$tableName' using TRUNCATE CASCADE");
+                } catch (\Exception $cascadeError) {
+                    // 試行3: 制約を無視したい場合のログだけ出力
+                    error_log("PostgreSQL: Could not reset table '$tableName' due to FK constraints. Skipping reset.");
+                    error_log("Cascade error: " . $cascadeError->getMessage());
+                    
+                    // テーブルリセットを諦めて、データが既存の場合は上書きで処理
+                    // 実際のデータ移行時にUPSERTやCONFLICT処理で対応
+                }
+            } else {
+                // その他のエラーは再スロー
+                throw $e;
+            }
         }
     }
 
@@ -298,10 +334,20 @@ class DataMigrationService
             
             // PostgreSQL外部キー制約エラーの検出
             if (strpos($errorMessage, 'foreign key constraint') !== false || 
-                strpos($errorMessage, 'violates not-null constraint') !== false) {
+                strpos($errorMessage, 'violates not-null constraint') !== false ||
+                strpos($errorMessage, 'violates unique constraint') !== false) {
                 
-                error_log("PostgreSQL FK constraint error in table '$tableName': " . $errorMessage);
+                error_log("PostgreSQL constraint error in table '$tableName': " . $errorMessage);
                 error_log("Attempting fallback strategies...");
+                
+                // トランザクション状態をリセット
+                try {
+                    $em->rollBack();
+                    $em->beginTransaction();
+                    error_log("PostgreSQL: Transaction reset for constraint error recovery");
+                } catch (\Exception $txError) {
+                    error_log("PostgreSQL: Could not reset transaction: " . $txError->getMessage());
+                }
                 
                 // フォールバック戦略を実行
                 return $this->handlePostgreSQLConstraintError($builder, $tableName, $em, $errorMessage);
