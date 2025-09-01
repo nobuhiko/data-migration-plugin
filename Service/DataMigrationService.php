@@ -140,12 +140,13 @@ class DataMigrationService
     {
         $platform = $em->getDatabasePlatform()->getName();
         error_log("PostgreSQL Debug: Platform detected as '$platform' for table '$tableName'");
+        error_log("PostgreSQL Debug: Platform class: " . get_class($em->getDatabasePlatform()));
 
-        if ($platform == 'mysql') {
+        if ($platform == 'mysql' || strpos($platform, 'mysql') !== false) {
             error_log("PostgreSQL Debug: Using MySQL DELETE for table '$tableName'");
             $em->exec('DELETE FROM ' . $tableName);
         } else {
-            error_log("PostgreSQL Debug: Using PostgreSQL TRUNCATE CASCADE for table '$tableName'");
+            error_log("PostgreSQL Debug: Using PostgreSQL TRUNCATE CASCADE for table '$tableName' (platform: '$platform')");
             // PostgreSQL用: より単純なアプローチ - テーブルが空でない場合のみトランケート実行
             try {
                 $em->exec('TRUNCATE TABLE ' . $tableName . ' RESTART IDENTITY CASCADE');
