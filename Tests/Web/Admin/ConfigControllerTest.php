@@ -79,18 +79,24 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             // PostgreSQL用のトランザクション状態確認とリセット
             $connection = $this->entityManager->getConnection();
             if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
-                if ($connection->isTransactionActive()) {
-                    try {
-                        // トランザクションが異常終了状態の場合、ロールバックして新しいトランザクションを開始
+                try {
+                    // PostgreSQLで失敗したトランザクションを確実にクリア
+                    if ($connection->isTransactionActive()) {
                         $connection->rollBack();
-                        $connection->beginTransaction();
-                    } catch (\Exception $txError) {
-                        // トランザクションエラーをログに記録
-                        error_log("PostgreSQL test transaction reset error: " . $txError->getMessage());
                     }
-                } else {
-                    // トランザクションがない場合は新しく開始
-                    $connection->beginTransaction();
+                    
+                    // EntityManagerをクリアして新しい状態でSELECTクエリを実行
+                    $this->entityManager->clear();
+                    
+                    // 新しいトランザクションを開始
+                    if (!$connection->isTransactionActive()) {
+                        $connection->beginTransaction();
+                    }
+                } catch (\Exception $txError) {
+                    // トランザクションエラーをログに記録
+                    error_log("PostgreSQL test transaction reset error: " . $txError->getMessage());
+                    // EntityManagerをクリアしてクリーンな状態にする
+                    $this->entityManager->clear();
                 }
             }
             
@@ -117,10 +123,17 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                     if ($connection->isTransactionActive()) {
                         $connection->rollBack();
                     }
-                    $connection->beginTransaction();
+                    // EntityManagerをクリアして失敗したトランザクション状態をリセット
+                    $this->entityManager->clear();
+                    
+                    if (!$connection->isTransactionActive()) {
+                        $connection->beginTransaction();
+                    }
                     error_log("PostgreSQL test transaction reset after exception: " . $e->getMessage());
                 } catch (\Exception $txError) {
                     error_log("PostgreSQL test transaction reset failed: " . $txError->getMessage());
+                    // エラー時もEntityManagerをクリア
+                    $this->entityManager->clear();
                 }
             } else {
                 // MySQL用の既存のロジック
