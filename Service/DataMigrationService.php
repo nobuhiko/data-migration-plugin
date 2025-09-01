@@ -311,7 +311,22 @@ class DataMigrationService
         
         try {
             // 通常の一括挿入を試行
+            error_log("PostgreSQL Debug: Executing bulk insert for table '$tableName' with " . count($builder->getValues()) . " values");
             $builder->execute();
+            error_log("PostgreSQL Debug: Bulk insert successful for table '$tableName'");
+            
+            // PostgreSQLの場合、実際にデータが挿入されたか確認
+            $checkSql = "SELECT COUNT(*) FROM $tableName";
+            $count = $em->fetchOne($checkSql);
+            error_log("PostgreSQL Debug: Table '$tableName' now has $count rows");
+            
+            // dtb_orderの場合、より詳細なデバッグ
+            if ($tableName === 'dtb_order') {
+                $sampleSql = "SELECT id, customer_id, order_status_id FROM dtb_order LIMIT 3";
+                $samples = $em->fetchAllAssociative($sampleSql);
+                error_log("PostgreSQL Debug: dtb_order sample data: " . json_encode($samples));
+            }
+            
             return true;
         } catch (\Exception $e) {
             $errorMessage = $e->getMessage();
@@ -648,30 +663,34 @@ class DataMigrationService
         
         $tbl_flg = false;
         $col_flg = false;
+        $fpcsv = null;
+        $tableName = null;
 
         if (($handle = fopen($tmpDir . $csvName, 'r')) !== false) {
             error_log("PostgreSQL Debug: Successfully opened backup file for processing");
-            $fpcsv = '';
             while (($row = fgetcsv($handle)) !== false) {
                 // デバッグ：行データを確認
-                if (count($row) <= 3) { // 最初の数行のみログ
+                if ($tbl_flg === false && count($row) <= 3) { // テーブル名判定時のみログ
                     error_log("PostgreSQL Debug Row: count=" . count($row) . ", data=[" . implode('|', $row) . "], first='" . (isset($row[0]) ? $row[0] : 'NULL') . "'");
                 }
                 
                 //空白行のときはテーブル変更（より厳密な判定）
-                if (count($row) <= 1 && (empty($row) || trim($row[0]) === '')) {
+                if (empty($row) || (count($row) == 1 && trim($row[0]) === '')) {
                     $tbl_flg = false;
                     $col_flg = false;
                     $enablePoint = false;
                     $key = [];
                     $i = 1;
-
+                    if ($fpcsv) {
+                        fclose($fpcsv);
+                        $fpcsv = null;
+                    }
                     continue;
                 }
 
                 // テーブルフラグがたっていない場合にはテーブル名セット
-                if (!$tbl_flg) {
-                    error_log("PostgreSQL Debug: Processing table: " . $row[0]);
+                if (!$tbl_flg && count($row) == 1) {  // テーブル名は1カラムのみの行
+                    error_log("PostgreSQL Debug: Checking potential table name: " . $row[0]);
                     // 特定のテーブルのみ
                     switch ($row[0]) {
                         case 'dtb_baseinfo':
@@ -697,7 +716,7 @@ class DataMigrationService
                             $tbl_flg = true;
 
                             $fpcsv = fopen($tmpDir . $tableName . '.csv', 'w');
-                            error_log("PostgreSQL Debug: Created CSV file for table: " . $tmpDir . $tableName . '.csv');
+                            error_log("PostgreSQL Debug: Processing table '" . $tableName . "', created CSV: " . $tmpDir . $tableName . '.csv');
                             break;
 
                         case 'dtb_other_deliv':
@@ -735,7 +754,9 @@ class DataMigrationService
                     }
                 }
             } // end while
-            fclose($fpcsv);
+            if ($fpcsv) {
+                fclose($fpcsv);
+            }
             fclose($handle);
         }
     }

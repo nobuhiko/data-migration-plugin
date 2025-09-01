@@ -121,14 +121,22 @@ class ConfigController extends AbstractController
                     }
                 }
             } else {
-                if ($form['customer_order_only']->getData()) {
+                $customerOrderOnly = $form['customer_order_only']->getData();
+                error_log("PostgreSQL Debug: customer_order_only flag = " . ($customerOrderOnly ? 'true' : 'false'));
+                
+                if ($customerOrderOnly) {
                     // 会員・受注のみ移行
+                    error_log("PostgreSQL Debug: Using customer_order_only mode");
                     $this->saveCustomerAndOrder($em, $csvDir);
                 } else {
+                    error_log("PostgreSQL Debug: Using full migration mode");
                     // 全データ移行
                     $this->saveCustomer($em, $csvDir);
+                    error_log("PostgreSQL Debug: Starting saveProduct");
                     $this->saveProduct($em, $csvDir);
+                    error_log("PostgreSQL Debug: Starting saveOrder");
                     $this->saveOrder($em, $csvDir);
+                    error_log("PostgreSQL Debug: Completed saveOrder");
                 }
 
                 // plg_customerplusの移行処理を作る
@@ -327,10 +335,14 @@ class ConfigController extends AbstractController
 
             $builder = new BulkInsertQuery($em, $tableName);
             $builder->setColumns($listTableColumns);
+            
+            error_log("PostgreSQL Debug: Processing table '$tableName' with columns: " . implode(', ', $listTableColumns));
 
             $batchSize = 20;
+            $rowCount = 0;
 
             while (($row = fgetcsv($handle)) !== false) {
+                $rowCount++;
                 $value = [];
 
                 // 1行目をkeyとした配列を作る
@@ -455,7 +467,9 @@ class ConfigController extends AbstractController
 
             if (count($builder->getValues()) > 0) {
                 try {
+                    error_log("PostgreSQL Debug: Final batch for '$tableName' with " . count($builder->getValues()) . " records");
                     $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
+                    error_log("PostgreSQL Debug: Final batch successfully executed for '$tableName'");
                 } catch (\Exception $e) {
                     error_log("BulkInsertQuery final execute error in saveToC table '$tableName': " . $e->getMessage());
                     error_log("Failed final batch, data count: " . count($builder->getValues()));
@@ -464,6 +478,8 @@ class ConfigController extends AbstractController
             }
 
             fclose($handle);
+            
+            error_log("PostgreSQL Debug: Completed importing $rowCount rows from $csvName.csv to table '$tableName'");
 
             return $i; // indexを返す
         }
@@ -1120,13 +1136,33 @@ class ConfigController extends AbstractController
         // 会員系
         if (file_exists($csvDir . 'dtb_order.csv') && filesize($csvDir . 'dtb_order.csv') > 0) {
             $platform = $this->dataMigrationService->begin($em);
+            
+            // PostgreSQL: 外部キー制約エラー対策 - dtb_customerの存在確認
+            $customerCount = $em->fetchOne('SELECT COUNT(*) FROM dtb_customer');
+            error_log("PostgreSQL Debug: Found $customerCount customers before order processing");
 
-            // 2.4には存在しないデータ
-            if (!$this->dataMigrationService->isVersion('2.4.4')) {
-                $this->saveToO($em, $csvDir, 'mtb_device_type', null, true);
+            // PostgreSQL: dtb_orderに必要な依存テーブルを先に処理（最適化された順序）
+            error_log("PostgreSQL Debug: Processing dtb_order dependencies in optimized order");
+            
+            // 1. 重要: 他のトランザクションで処理されている可能性のあるテーブルを再処理
+            if ($customerCount == 0) {
+                error_log("PostgreSQL Debug: dtb_customer is empty, processing customer data in order transaction");
+                $this->saveToC($em, $csvDir, 'dtb_customer');
+                
+                // PostgreSQL: 顧客データ処理後の確認
+                $customerCountAfter = $em->fetchOne('SELECT COUNT(*) FROM dtb_customer');
+                error_log("PostgreSQL Debug: Customer count after processing: $customerCountAfter");
             }
-            // todo mtb_order_status.display_order_count
+            
+            // 2. 基本マスターテーブル（dtb_orderが参照するもの）
             $this->saveToO($em, $csvDir, 'mtb_device_type', null, true);
+            $this->saveToO($em, $csvDir, 'mtb_sex', null, true);
+            $this->saveToO($em, $csvDir, 'mtb_job', null, true);
+            $this->saveToO($em, $csvDir, 'mtb_pref', null, true);
+            $this->saveToO($em, $csvDir, 'mtb_country', null, true);
+            
+            // 3. 決済テーブル（dtb_orderのpayment_idが参照）
+            $this->saveToO($em, $csvDir, 'dtb_payment');
 
             if ($this->dataMigrationService->isVersion('4.0/4.1')) {
                 $this->saveToP($em, $csvDir, 'mtb_order_status', null, true);
@@ -1148,10 +1184,37 @@ class ConfigController extends AbstractController
                 $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
             }
 
-            // fixme dtb_delivery_time のあとにやらなければダメ
+            // 4. 全ての依存テーブル処理後、最終確認してdtb_orderを処理
+            error_log("PostgreSQL Debug: Final dependency check before dtb_order processing");
+            
+            // PostgreSQL: 依存データの最終確認
+            $dependencyCheck = [
+                'dtb_customer' => $em->fetchOne('SELECT COUNT(*) FROM dtb_customer'),
+                'dtb_payment' => $em->fetchOne('SELECT COUNT(*) FROM dtb_payment'),
+                'mtb_device_type' => $em->fetchOne('SELECT COUNT(*) FROM mtb_device_type'),
+                'mtb_sex' => $em->fetchOne('SELECT COUNT(*) FROM mtb_sex'),
+                'mtb_job' => $em->fetchOne('SELECT COUNT(*) FROM mtb_job')
+            ];
+            
+            $allDependenciesReady = true;
+            foreach ($dependencyCheck as $table => $count) {
+                error_log("PostgreSQL Debug: Final check - Table $table has $count records");
+                if ($count == 0 && in_array($table, ['dtb_customer', 'dtb_payment'])) {
+                    error_log("PostgreSQL Warning: Critical dependency $table is still empty!");
+                    $allDependenciesReady = false;
+                }
+            }
+            
+            if ($allDependenciesReady) {
+                error_log("PostgreSQL Debug: All dependencies satisfied, processing dtb_order");
+            } else {
+                error_log("PostgreSQL Warning: Dependencies not fully satisfied, dtb_order may encounter constraints");
+            }
+            
             $this->saveToO($em, $csvDir, 'dtb_order');
+            
+            // 4. dtb_orderに依存するテーブル
             $this->saveToO($em, $csvDir, 'dtb_shipping');
-            $this->saveToO($em, $csvDir, 'dtb_payment');
 
             if (!isset($this->product_class_id)) {
                 sleep(5);
@@ -1194,11 +1257,22 @@ class ConfigController extends AbstractController
             }
 
             // イレギュラー対応
-            $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
+            error_log("PostgreSQL Debug: Executing order status cleanup");
+            $updateCount = $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
+            error_log("PostgreSQL Debug: Updated $updateCount orders with invalid status");
 
             // PostgreSQL用のコミット処理
             try {
+                error_log("PostgreSQL Debug: Committing saveOrder transaction");
                 $em->commit();
+                error_log("PostgreSQL Debug: saveOrder transaction committed successfully");
+                
+                // コミット後のデータ確認
+                $orderCount = $em->fetchOne('SELECT COUNT(*) FROM dtb_order');
+                $customerCountFinal = $em->fetchOne('SELECT COUNT(*) FROM dtb_customer');
+                error_log("PostgreSQL Debug: Order count after commit: $orderCount");
+                error_log("PostgreSQL Debug: Customer count after commit: $customerCountFinal");
+                
                 $this->addSuccess('受注データを登録しました。', 'admin');
             } catch (\Exception $e) {
                 error_log('PostgreSQL commit error in saveOrder: ' . $e->getMessage());
@@ -1217,10 +1291,16 @@ class ConfigController extends AbstractController
         $tableName = ($tableName) ? $tableName : $csvName;
         $this->dataMigrationService->resetTable($em, $tableName);
 
-        if (file_exists($tmpDir . $csvName . '.csv') == false) {
+        $fullPath = $tmpDir . $csvName . '.csv';
+        error_log("PostgreSQL Debug: saveToO looking for CSV file: $fullPath (table: $tableName)");
+
+        if (file_exists($fullPath) == false) {
+            error_log("PostgreSQL Debug: saveToO CSV file NOT FOUND: $fullPath");
             // 無視する
             //$this->addDanger($csvName.'.csv が見つかりませんでした' , 'admin');
             return;
+        } else {
+            error_log("PostgreSQL Debug: saveToO CSV file found successfully: $fullPath");
         }
         if (filesize($tmpDir . $csvName . '.csv') == 0) {
             // 無視する
@@ -1244,10 +1324,14 @@ class ConfigController extends AbstractController
 
             $builder = new BulkInsertQuery($em, $tableName);
             $builder->setColumns($listTableColumns);
+            
+            error_log("PostgreSQL Debug: Processing table '$tableName' (saveToO) with columns: " . implode(', ', $listTableColumns));
 
             $batchSize = 20;
+            $rowCount = 0;
 
             while (($row = fgetcsv($handle)) !== false) {
+                $rowCount++;
                 $value = [];
 
                 // 1行目をkeyとした配列を作る
@@ -1637,10 +1721,14 @@ class ConfigController extends AbstractController
             }
 
             if (count($builder->getValues()) > 0) {
+                error_log("PostgreSQL Debug: Final batch for '$tableName' (saveToO) with " . count($builder->getValues()) . " records");
                 $this->dataMigrationService->executeWithPostgreSQLFallback($builder, $tableName, $em);
+                error_log("PostgreSQL Debug: Final batch successfully executed for '$tableName' (saveToO)");
             }
 
             fclose($handle);
+            
+            error_log("PostgreSQL Debug: Completed importing $rowCount rows from $csvName.csv to table '$tableName' (saveToO)");
 
             return $i; // indexを返す
         }
@@ -1840,6 +1928,21 @@ class ConfigController extends AbstractController
 
         $tableName = str_replace('.csv', '', $csvName);
         error_log("PostgreSQL Debug: Table name: $tableName");
+        
+        // 特別なテーブルの処理をログ出力
+        if ($tableName === 'dtb_customer') {
+            error_log("PostgreSQL Debug: Processing dtb_customer via fix4x method");
+        } elseif ($tableName === 'dtb_order') {
+            error_log("PostgreSQL Debug: Processing dtb_order via fix4x method - checking dependencies");
+            
+            // PostgreSQL: dtb_orderの依存関係チェック
+            try {
+                $customerCount = $this->em->fetchOne('SELECT COUNT(*) FROM dtb_customer');
+                error_log("PostgreSQL Debug: fix4x dtb_order - Found $customerCount customers before processing");
+            } catch (\Exception $e) {
+                error_log("PostgreSQL Debug: fix4x dtb_order - Error checking customer count: " . $e->getMessage());
+            }
+        }
         
         $columns = $em->getSchemaManager()->listTableColumns($tableName);
 
