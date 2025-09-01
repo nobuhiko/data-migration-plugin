@@ -324,13 +324,29 @@ class DataMigrationService
                 error_log("PostgreSQL constraint error in table '$tableName': " . $errorMessage);
                 error_log("Attempting fallback strategies...");
                 
-                // トランザクション状態をリセット
+                // PostgreSQL用のトランザクション状態をリセット
                 try {
-                    $em->rollBack();
-                    $em->beginTransaction();
+                    // PostgreSQLの場合、異常終了したトランザクションを完全にリセット
+                    if ($em->isTransactionActive()) {
+                        $em->rollBack();
+                    }
+                    // 新しいトランザクションを開始
+                    if (!$em->isTransactionActive()) {
+                        $em->beginTransaction();
+                    }
                     error_log("PostgreSQL: Transaction reset for constraint error recovery");
                 } catch (\Exception $txError) {
                     error_log("PostgreSQL: Could not reset transaction: " . $txError->getMessage());
+                    // トランザクションリセットに失敗した場合、接続を再初期化する
+                    try {
+                        $em->close();
+                        if (!$em->isTransactionActive()) {
+                            $em->beginTransaction();
+                        }
+                        error_log("PostgreSQL: Connection reset and transaction restarted");
+                    } catch (\Exception $connError) {
+                        error_log("PostgreSQL: Connection reset failed: " . $connError->getMessage());
+                    }
                 }
                 
                 // フォールバック戦略を実行

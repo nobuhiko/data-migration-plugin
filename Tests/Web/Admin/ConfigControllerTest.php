@@ -76,6 +76,24 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                 ['config' => ['import_file' => $file]]
             );
             
+            // PostgreSQL用のトランザクション状態確認とリセット
+            $connection = $this->entityManager->getConnection();
+            if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
+                if ($connection->isTransactionActive()) {
+                    try {
+                        // トランザクションが異常終了状態の場合、ロールバックして新しいトランザクションを開始
+                        $connection->rollBack();
+                        $connection->beginTransaction();
+                    } catch (\Exception $txError) {
+                        // トランザクションエラーをログに記録
+                        error_log("PostgreSQL test transaction reset error: " . $txError->getMessage());
+                    }
+                } else {
+                    // トランザクションがない場合は新しく開始
+                    $connection->beginTransaction();
+                }
+            }
+            
             $customers = $this->entityManager->getRepository(Customer::class)->findAll();
             self::assertEquals($c, count($customers));
     
@@ -92,10 +110,24 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             //$authMagic = $eccubeConfig->get('eccube_auth_magic');
             //self::assertEquals('dummy', $authMagic);
         } catch (\Exception $e) {
-            // エラーが発生した場合は、トランザクションをリセットしてから例外を再スローする
-            if ($this->entityManager->getConnection()->isTransactionActive()) {
-                $this->entityManager->getConnection()->rollBack();
-                $this->entityManager->getConnection()->beginTransaction();
+            // エラーが発生した場合は、PostgreSQLのトランザクション状態を確認してリセット
+            $connection = $this->entityManager->getConnection();
+            if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
+                try {
+                    if ($connection->isTransactionActive()) {
+                        $connection->rollBack();
+                    }
+                    $connection->beginTransaction();
+                    error_log("PostgreSQL test transaction reset after exception: " . $e->getMessage());
+                } catch (\Exception $txError) {
+                    error_log("PostgreSQL test transaction reset failed: " . $txError->getMessage());
+                }
+            } else {
+                // MySQL用の既存のロジック
+                if ($connection->isTransactionActive()) {
+                    $connection->rollBack();
+                    $connection->beginTransaction();
+                }
             }
             throw $e;
         }

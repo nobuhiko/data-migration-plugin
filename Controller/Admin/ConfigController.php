@@ -216,8 +216,17 @@ class ConfigController extends AbstractController
             $this->dataMigrationService->setIdSeq($em, 'dtb_mail_history');
         }
 
-        $em->commit();
-        $this->addSuccess('会員データ・受注データを登録しました。', 'admin');
+        // PostgreSQL用のコミット処理
+        try {
+            $em->commit();
+            $this->addSuccess('会員データ・受注データを登録しました。', 'admin');
+        } catch (\Exception $e) {
+            error_log('PostgreSQL commit error in saveCustomer: ' . $e->getMessage());
+            if ($em->isTransactionActive()) {
+                $em->rollback();
+            }
+            throw $e;
+        }
     }
 
     private function saveCustomer($em, $csvDir)
@@ -255,9 +264,18 @@ class ConfigController extends AbstractController
                 $this->dataMigrationService->setIdSeq($em, 'dtb_customer');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_customer_address');
             }
-            $em->commit();
-
-            $this->addSuccess('会員データ登録しました。', 'admin');
+            
+            // PostgreSQL用のコミット処理
+            try {
+                $em->commit();
+                $this->addSuccess('会員データ登録しました。', 'admin');
+            } catch (\Exception $e) {
+                error_log('PostgreSQL commit error in saveCustomer (v2): ' . $e->getMessage());
+                if ($em->isTransactionActive()) {
+                    $em->rollback();
+                }
+                throw $e;
+            }
         } else {
             $this->addDanger('会員データが見つかりませんでした', 'admin');
         }
@@ -536,9 +554,17 @@ class ConfigController extends AbstractController
                 $this->dataMigrationService->setIdSeq($em, 'dtb_customer_favorite_product');
             }
 
-            $em->commit();
-
-            $this->addSuccess('商品データを登録しました。', 'admin');
+            // PostgreSQL用のコミット処理
+            try {
+                $em->commit();
+                $this->addSuccess('商品データを登録しました。', 'admin');
+            } catch (\Exception $e) {
+                error_log('PostgreSQL commit error in saveProduct: ' . $e->getMessage());
+                if ($em->isTransactionActive()) {
+                    $em->rollback();
+                }
+                throw $e;
+            }
         } else {
             $this->addDanger('商品データがが見つかりませんでした', 'admin');
         }
@@ -1161,9 +1187,17 @@ class ConfigController extends AbstractController
             // イレギュラー対応
             $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
 
-            $em->commit();
-
-            $this->addSuccess('受注データを登録しました。', 'admin');
+            // PostgreSQL用のコミット処理
+            try {
+                $em->commit();
+                $this->addSuccess('受注データを登録しました。', 'admin');
+            } catch (\Exception $e) {
+                error_log('PostgreSQL commit error in saveOrder: ' . $e->getMessage());
+                if ($em->isTransactionActive()) {
+                    $em->rollback();
+                }
+                throw $e;
+            }
         } else {
             $this->addDanger('受注データが見つかりませんでした', 'admin');
         }
@@ -1861,7 +1895,17 @@ class ConfigController extends AbstractController
                     return;
                 }
             }
-            $em->commit();
+            
+            // PostgreSQL用のコミット処理
+            try {
+                $em->commit();
+            } catch (\Exception $e) {
+                error_log('PostgreSQL commit error in saveToC/P/O: ' . $e->getMessage());
+                if ($em->isTransactionActive()) {
+                    $em->rollback();
+                }
+                throw $e;
+            }
 
             fclose($handle);
 
