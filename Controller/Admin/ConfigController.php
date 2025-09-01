@@ -1821,18 +1821,25 @@ class ConfigController extends AbstractController
         }
 
         // csvNameからテーブル名を取得
+        error_log("PostgreSQL Debug: Processing CSV file: $csvName from directory: $tmpDir");
 
         if (filesize($tmpDir . $csvName) == 0) {
+            error_log("PostgreSQL Debug: CSV file is empty: $csvName");
             // 無視する
             return;
         }
 
         $tableName = str_replace('.csv', '', $csvName);
+        error_log("PostgreSQL Debug: Table name: $tableName");
+        
         $columns = $em->getSchemaManager()->listTableColumns($tableName);
 
         if ($columns == false) {
+            error_log("PostgreSQL Debug: No columns found for table: $tableName");
             return;
         }
+        
+        error_log("PostgreSQL Debug: Found " . count($columns) . " columns for table: $tableName");
         $listTableColumns = [];
         foreach ($columns as $column) {
             $listTableColumns[] = $column->getName();
@@ -1847,16 +1854,24 @@ class ConfigController extends AbstractController
         $batchSize = 20;
 
         if (($handle = fopen($tmpDir . $csvName, 'r')) !== false) {
+            error_log("PostgreSQL Debug: Successfully opened CSV file: " . $tmpDir . $csvName);
             // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
             $key = fgetcsv($handle);
+            error_log("PostgreSQL Debug: CSV header: " . ($key ? implode(',', $key) : 'NULL'));
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
 
             $i = 1;
             while (($row = fgetcsv($handle)) !== false) {
+                if ($i <= 3) { // First 3 rows for debugging
+                    error_log("PostgreSQL Debug: Row $i raw data: " . implode(',', $row));
+                }
 
                 // 1行目をkeyとした配列を作る
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
+                if ($i <= 3) { // First 3 rows for debugging
+                    error_log("PostgreSQL Debug: Row $i combined data: " . json_encode($data));
+                }
                 // Schemaにあわせた配列を作成する
                 $value = [];
                 foreach ($columns as $column) {

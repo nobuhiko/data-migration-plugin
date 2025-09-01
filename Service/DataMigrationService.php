@@ -402,6 +402,13 @@ class DataMigrationService
         error_log("PostgreSQL: Foreign key constraint error detected for table '$tableName'");
         error_log("PostgreSQL: Error details: " . $errorMessage);
         
+        // デバッグ用：実際のデータ内容を出力
+        $values = $builder->getValues();
+        if (!empty($values)) {
+            error_log("PostgreSQL: First row data: " . json_encode($values[0]));
+            error_log("PostgreSQL: Total rows in batch: " . count($values));
+        }
+        
         // エラーメッセージから参照先テーブルを特定
         $referencedTable = $this->extractReferencedTableFromError($errorMessage);
         if ($referencedTable) {
@@ -637,10 +644,13 @@ class DataMigrationService
     // 2.4.4から
     public function cutOff24($tmpDir, $csvName)
     {
+        error_log("PostgreSQL Debug: Starting cutOff24 processing for file: " . $tmpDir . $csvName);
+        
         $tbl_flg = false;
         $col_flg = false;
 
         if (($handle = fopen($tmpDir . $csvName, 'r')) !== false) {
+            error_log("PostgreSQL Debug: Successfully opened backup file for processing");
             $fpcsv = '';
             while (($row = fgetcsv($handle)) !== false) {
                 //空白行のときはテーブル変更
@@ -656,6 +666,7 @@ class DataMigrationService
 
                 // テーブルフラグがたっていない場合にはテーブル名セット
                 if (!$tbl_flg) {
+                    error_log("PostgreSQL Debug: Processing table: " . $row[0]);
                     // 特定のテーブルのみ
                     switch ($row[0]) {
                         case 'dtb_baseinfo':
@@ -681,6 +692,7 @@ class DataMigrationService
                             $tbl_flg = true;
 
                             $fpcsv = fopen($tmpDir . $tableName . '.csv', 'w');
+                            error_log("PostgreSQL Debug: Created CSV file for table: " . $tmpDir . $tableName . '.csv');
                             break;
 
                         case 'dtb_other_deliv':
@@ -713,6 +725,9 @@ class DataMigrationService
 
                 if ($tbl_flg) {
                     fputcsv($fpcsv, $row);
+                    if (isset($tableName) && $tableName == 'dtb_customer' && count($row) > 1) {
+                        error_log("PostgreSQL Debug: Wrote customer data row: " . implode(',', array_slice($row, 0, 5)) . "...");
+                    }
                 }
             } // end while
             fclose($fpcsv);
