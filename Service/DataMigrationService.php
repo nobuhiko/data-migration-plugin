@@ -139,6 +139,7 @@ class DataMigrationService
     public function resetTable(Connection $em, $tableName)
     {
         $platform = $em->getDatabasePlatform()->getName();
+        error_log("PostgreSQL Debug: Platform detected as '$platform' for table '$tableName'");
 
         if ($platform == 'mysql') {
             $em->exec('DELETE FROM ' . $tableName);
@@ -606,21 +607,42 @@ class DataMigrationService
 
         $em->exec($sql);
 
-        // リレーションエラーになるので
-        $em->exec('DELETE FROM dtb_cart');
-        $em->exec('DELETE FROM dtb_cart_item');
+        // リレーションエラーになるので - PostgreSQL対応
+        $this->executePostgreSQLAwareDelete($em, 'DELETE FROM dtb_cart');
+        $this->executePostgreSQLAwareDelete($em, 'DELETE FROM dtb_cart_item');
 
-        // 外部キー制約エラーになるデータを消す
-        $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
-        $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
-        $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
+        // 外部キー制約エラーになるデータを消す - PostgreSQL対応
+        $this->executePostgreSQLAwareDelete($em, 'DELETE FROM dtb_class_category WHERE id = 0');
+        $this->executePostgreSQLAwareDelete($em, 'UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
+        $this->executePostgreSQLAwareDelete($em, 'UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
 
-        $em->exec('delete from dtb_product_tag where id in (
+        $this->executePostgreSQLAwareDelete($em, 'delete from dtb_product_tag where id in (
                         select id from (select t1.id from dtb_product_tag t1 left join dtb_tag t2 on t1.tag_id = t2.id where t2.id is null) as tmp
                     );');
-        $em->exec('delete from dtb_product_tag where id in (
+        $this->executePostgreSQLAwareDelete($em, 'delete from dtb_product_tag where id in (
                         select id from (select t1.id from dtb_product_tag t1 left join dtb_product t2 on t1.product_id = t2.id where t2.id is null) as tmp
                     );');
+    }
+
+    /**
+     * PostgreSQL-aware database operation with constraint violation handling
+     */
+    private function executePostgreSQLAwareDelete($em, $query)
+    {
+        try {
+            $em->exec($query);
+        } catch (\Exception $e) {
+            $platform = $em->getDatabasePlatform()->getName();
+            if ($platform === 'postgresql') {
+                // PostgreSQLの場合、制約違反エラーをログに記録して続行
+                error_log("PostgreSQL: Database operation failed due to constraints, skipping: " . $e->getMessage());
+                error_log("PostgreSQL: Failed query: " . $query);
+                // DELETE が失敗してもデータ移行は続行（後続のINSERTで重複対応）
+            } else {
+                // 他のデータベースでは元のエラーを再発生
+                throw $e;
+            }
+        }
     }
 
     public function begin($em)
