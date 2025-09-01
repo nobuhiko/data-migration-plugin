@@ -650,8 +650,31 @@ class DataMigrationService
 
     public function begin($em)
     {
-        $em->beginTransaction();
+        // プラットフォームを先に取得
         $platform = $em->getDatabasePlatform()->getName();
+        
+        // PostgreSQL: 既存のトランザクション状態を確認してクリア
+        if ($platform === 'postgresql') {
+            try {
+                // 既存のトランザクションがある場合はロールバック
+                if ($em->isTransactionActive()) {
+                    error_log("PostgreSQL: Existing transaction found in begin(), rolling back");
+                    $em->rollBack();
+                }
+            } catch (\Exception $e) {
+                error_log("PostgreSQL: Error checking transaction state: " . $e->getMessage());
+                // エラーが発生した場合は接続をリセット
+                try {
+                    $em->close();
+                    $em->connect();
+                } catch (\Exception $reconnectError) {
+                    error_log("PostgreSQL: Connection reset failed: " . $reconnectError->getMessage());
+                }
+            }
+        }
+        
+        // 新しいトランザクションを開始
+        $em->beginTransaction();
 
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');

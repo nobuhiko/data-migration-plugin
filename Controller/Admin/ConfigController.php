@@ -149,19 +149,52 @@ class ConfigController extends AbstractController
                 $customerOrderOnly = $form['customer_order_only']->getData();
                 error_log("PostgreSQL Debug: customer_order_only flag = " . ($customerOrderOnly ? 'true' : 'false'));
 
-                if ($customerOrderOnly) {
-                    // 会員・受注のみ移行
-                    error_log("PostgreSQL Debug: Using customer_order_only mode");
-                    $this->saveCustomerAndOrder($em, $csvDir);
+                // PostgreSQL用のエラーハンドリングを追加
+                $platform = $em->getDatabasePlatform()->getName();
+                if ($platform === 'postgresql') {
+                    try {
+                        if ($customerOrderOnly) {
+                            // 会員・受注のみ移行
+                            error_log("PostgreSQL Debug: Using customer_order_only mode with PostgreSQL handling");
+                            $this->saveCustomerAndOrder($em, $csvDir);
+                        } else {
+                            error_log("PostgreSQL Debug: Using full migration mode with PostgreSQL handling");
+                            // 全データ移行
+                            $this->saveCustomer($em, $csvDir);
+                            error_log("PostgreSQL Debug: Starting saveProduct");
+                            $this->saveProduct($em, $csvDir);
+                            error_log("PostgreSQL Debug: Starting saveOrder");
+                            $this->saveOrder($em, $csvDir);
+                            error_log("PostgreSQL Debug: Completed saveOrder");
+                        }
+                    } catch (\Exception $e) {
+                        error_log("PostgreSQL Debug: Migration error caught: " . $e->getMessage());
+                        
+                        // トランザクションエラーの場合はリセット
+                        if (strpos($e->getMessage(), '25P02') !== false || 
+                            strpos($e->getMessage(), 'current transaction is aborted') !== false) {
+                            error_log("PostgreSQL Debug: Detected 25P02 error, attempting transaction reset");
+                            $this->resetPostgreSQLTransaction($em);
+                        }
+                        
+                        throw $e;
+                    }
                 } else {
-                    error_log("PostgreSQL Debug: Using full migration mode");
-                    // 全データ移行
-                    $this->saveCustomer($em, $csvDir);
-                    error_log("PostgreSQL Debug: Starting saveProduct");
-                    $this->saveProduct($em, $csvDir);
-                    error_log("PostgreSQL Debug: Starting saveOrder");
-                    $this->saveOrder($em, $csvDir);
-                    error_log("PostgreSQL Debug: Completed saveOrder");
+                    // MySQL等の既存処理
+                    if ($customerOrderOnly) {
+                        // 会員・受注のみ移行
+                        error_log("PostgreSQL Debug: Using customer_order_only mode");
+                        $this->saveCustomerAndOrder($em, $csvDir);
+                    } else {
+                        error_log("PostgreSQL Debug: Using full migration mode");
+                        // 全データ移行
+                        $this->saveCustomer($em, $csvDir);
+                        error_log("PostgreSQL Debug: Starting saveProduct");
+                        $this->saveProduct($em, $csvDir);
+                        error_log("PostgreSQL Debug: Starting saveOrder");
+                        $this->saveOrder($em, $csvDir);
+                        error_log("PostgreSQL Debug: Completed saveOrder");
+                    }
                 }
 
                 // plg_customerplusの移行処理を作る
@@ -2345,9 +2378,22 @@ class ConfigController extends AbstractController
         $csvDir = $cacheDir . '/Plugin/' . substr(sha1(__FILE__), 0, 8) . '/';
 
         try {
-            // 1. dtb_base_info の確認・復旧
-            $baseInfoCount = $em->fetchOne('SELECT COUNT(*) FROM dtb_base_info');
-            error_log("PostgreSQL Debug: dtb_base_info count: $baseInfoCount");
+            // PostgreSQL: トランザクションエラーの場合はリセット
+            try {
+                // 1. dtb_base_info の確認・復旧
+                $baseInfoCount = $em->fetchOne('SELECT COUNT(*) FROM dtb_base_info');
+                error_log("PostgreSQL Debug: dtb_base_info count: $baseInfoCount");
+            } catch (\Exception $e) {
+                if (strpos($e->getMessage(), '25P02') !== false) {
+                    error_log("PostgreSQL Debug: Transaction error in restoreEssentialData, resetting");
+                    $this->resetPostgreSQLTransaction($em);
+                    // リセット後に再試行
+                    $baseInfoCount = $em->fetchOne('SELECT COUNT(*) FROM dtb_base_info');
+                    error_log("PostgreSQL Debug: dtb_base_info count after reset: $baseInfoCount");
+                } else {
+                    throw $e;
+                }
+            }
 
             if ($baseInfoCount == 0) {
                 error_log("PostgreSQL Debug: Restoring dtb_base_info from CSV");
@@ -2576,14 +2622,41 @@ class ConfigController extends AbstractController
                 error_log("PostgreSQL Debug: TRUNCATE CASCADE {$table}");
                 $em->exec("TRUNCATE TABLE {$table} RESTART IDENTITY CASCADE");
             } catch (\Exception $e) {
-                error_log("PostgreSQL Debug: TRUNCATE CASCADE failed for {$table}: " . $e->getMessage());
+                $errorMessage = $e->getMessage();
+                error_log("PostgreSQL Debug: TRUNCATE CASCADE failed for {$table}: " . $errorMessage);
                 
-                // SQLSTATE[25P02]エラーの場合はトランザクションリセット
-                if (strpos($e->getMessage(), '25P02') !== false) {
-                    error_log("PostgreSQL Debug: 25P02 error detected, resetting transaction");
-                    $this->resetPostgreSQLTransaction($em);
+                // テーブルが存在しない場合は警告を出して継続
+                if (strpos($errorMessage, '42P01') !== false || 
+                    strpos($errorMessage, 'does not exist') !== false) {
+                    error_log("PostgreSQL Debug: Table {$table} does not exist, skipping");
+                    continue;
                 }
-                // 一部のテーブルが存在しない場合は継続
+                
+                // SQLSTATE[25P02]エラーの場合はトランザクションリセットして再試行
+                if (strpos($errorMessage, '25P02') !== false || 
+                    strpos($errorMessage, 'current transaction is aborted') !== false) {
+                    error_log("PostgreSQL Debug: 25P02 error detected, resetting transaction and retrying");
+                    $this->resetPostgreSQLTransaction($em);
+                    
+                    // リセット後に再試行
+                    try {
+                        $em->exec("TRUNCATE TABLE {$table} RESTART IDENTITY CASCADE");
+                        error_log("PostgreSQL Debug: TRUNCATE CASCADE {$table} succeeded after reset");
+                    } catch (\Exception $retryError) {
+                        // 再試行も失敗した場合はテーブルが存在しない可能性
+                        if (strpos($retryError->getMessage(), '42P01') !== false || 
+                            strpos($retryError->getMessage(), 'does not exist') !== false) {
+                            error_log("PostgreSQL Debug: Table {$table} does not exist on retry, skipping");
+                            continue;
+                        }
+                        // その他のエラーは上位に伝播
+                        error_log("PostgreSQL Debug: TRUNCATE CASCADE {$table} failed after retry: " . $retryError->getMessage());
+                        throw $retryError;
+                    }
+                } else {
+                    // その他のエラーは上位に伝播
+                    throw $e;
+                }
             }
         }
         
