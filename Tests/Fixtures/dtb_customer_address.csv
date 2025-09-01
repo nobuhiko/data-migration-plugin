@@ -1,0 +1,3 @@
+customer_address_id,customer_id,country_id,pref,name01,name02,kana01,kana02,company_name,zip01,zip02,zipcode,addr01,addr02,tel01,tel02,tel03,fax01,fax02,fax03,create_date,update_date,del_flg
+1,1,,1,足立,智広,アダチ,チヒロ,,000,1111,0001111,ほっかいどう,くしろ,000,1111,1111,,,,"2020-06-26 17:30:12","2020-06-26 17:30:12",0
+2,1,,2,足立,智広,アダチ,チヒロ,株式会社いーしーきゅーぶ,000,1111,,りんご,なまはげ,444,3333,3333,,,,"2020-06-26 17:33:32","2020-06-26 17:33:32",0

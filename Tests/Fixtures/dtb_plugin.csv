@@ -1,0 +1,2 @@
+plugin_id,name,code,class_name,plugin_enable,del_flg,version,source,create_date,update_date
+1,EC-CUBE4系移行用バックアッププラグイン(3.0系),DataBackup3,,1,0,1.0.0,0,"2020-06-26 17:29:41","2020-06-26 17:29:44"

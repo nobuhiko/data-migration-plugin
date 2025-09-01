@@ -172,29 +172,36 @@ class DataMigrationService
             return $data;
         }
         
+        
         try {
+            $columns = $em->getSchemaManager()->listTableColumns($tableName);
+            $hasConversion = false;
+            
             foreach ($data as $key => &$value) {
-                // 空文字の場合のみNULL変換を行う（欠落フィールドは処理しない）
-                if ($value === '') {
-                    $columns = $em->getSchemaManager()->listTableColumns($tableName);
+                // 空文字またはfalseの場合にNULL変換を行う
+                if ($value === '' || $value === false) {
                     if (isset($columns[$key])) {
                         $column = $columns[$key];
                         $type = $column->getType()->getName();
                         
-                        // 数値型の場合、空文字をNULLに変換
+                        // 数値型の場合、空文字またはfalseをNULLに変換
                         if (in_array($type, ['integer', 'bigint', 'smallint', 'decimal', 'float', 'numeric'])) {
-                            error_log("Converting empty string to NULL for column '$key' of type '$type' in table '$tableName'");
                             $value = null;
+                            $hasConversion = true;
                         }
                         // 真偽値型の場合の処理
                         elseif ($type === 'boolean') {
                             $value = null;
+                            $hasConversion = true;
                         }
                     }
                 }
             }
+            
+            
         } catch (\Exception $e) {
-            error_log("Error in convertDataTypesForPostgreSQL: " . $e->getMessage());
+            error_log("Error in convertDataTypesForPostgreSQL for table '$tableName': " . $e->getMessage());
+            error_log("Data being processed: " . json_encode($data));
             // エラーが発生した場合は元のデータをそのまま返す
         }
         
