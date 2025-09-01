@@ -2078,7 +2078,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $i = $em->fetchOne('SELECT max(id) + 1  FROM ' . $tableName);
+        $i = $em->fetchOne('SELECT COALESCE(max(id), 0) + 1  FROM ' . $tableName);
         $batchSize = 20;
         foreach ($this->order_item as $order_id => $type) {
             foreach ($type as $key => $value) {
@@ -2418,7 +2418,113 @@ class ConfigController extends AbstractController
                 }
             }
 
-            // 4. mtb_rounding_type の確認・復旧
+            // 4. mtb_pref の確認・復旧（顧客データに必要）
+            $prefCount = $em->fetchOne('SELECT COUNT(*) FROM mtb_pref');
+            if ($prefCount == 0) {
+                error_log("PostgreSQL Debug: Restoring mtb_pref from CSV or default");
+                if (!$this->restoreFromCSV($em, $csvDir, 'mtb_pref')) {
+                    // CSVから復旧できない場合は標準的な都道府県データを復旧
+                    error_log("PostgreSQL Debug: Using default prefecture data");
+                    // 最低限必要な都道府県データ
+                    $prefectures = [
+                        [1, '北海道', 1],
+                        [2, '青森県', 2],
+                        [3, '岩手県', 3],
+                        [4, '宮城県', 4],
+                        [5, '秋田県', 5],
+                        [6, '山形県', 6],
+                        [7, '福島県', 7],
+                        [8, '茨城県', 8],
+                        [9, '栃木県', 9],
+                        [10, '群馬県', 10],
+                        [11, '埼玉県', 11],
+                        [12, '千葉県', 12],
+                        [13, '東京都', 13],
+                        [14, '神奈川県', 14],
+                        [15, '新潟県', 15],
+                        [16, '富山県', 16],
+                        [17, '石川県', 17],
+                        [18, '福井県', 18],
+                        [19, '山梨県', 19],
+                        [20, '長野県', 20],
+                        [21, '岐阜県', 21],
+                        [22, '静岡県', 22],
+                        [23, '愛知県', 23],
+                        [24, '三重県', 24],
+                        [25, '滋賀県', 25],
+                        [26, '京都府', 26],
+                        [27, '大阪府', 27],
+                        [28, '兵庫県', 28],
+                        [29, '奈良県', 29],
+                        [30, '和歌山県', 30],
+                        [31, '鳥取県', 31],
+                        [32, '島根県', 32],
+                        [33, '岡山県', 33],
+                        [34, '広島県', 34],
+                        [35, '山口県', 35],
+                        [36, '徳島県', 36],
+                        [37, '香川県', 37],
+                        [38, '愛媛県', 38],
+                        [39, '高知県', 39],
+                        [40, '福岡県', 40],
+                        [41, '佐賀県', 41],
+                        [42, '長崎県', 42],
+                        [43, '熊本県', 43],
+                        [44, '大分県', 44],
+                        [45, '宮崎県', 45],
+                        [46, '鹿児島県', 46],
+                        [47, '沖縄県', 47]
+                    ];
+                    
+                    foreach ($prefectures as $pref) {
+                        $em->exec("INSERT INTO mtb_pref (id, name, sort_no, discriminator_type) VALUES ({$pref[0]}, '{$pref[1]}', {$pref[2]}, 'pref')");
+                    }
+                }
+            }
+            
+            // 5. mtb_sex の確認・復旧（顧客データに必要）
+            $sexCount = $em->fetchOne('SELECT COUNT(*) FROM mtb_sex');
+            if ($sexCount == 0) {
+                error_log("PostgreSQL Debug: Restoring mtb_sex from CSV or default");
+                if (!$this->restoreFromCSV($em, $csvDir, 'mtb_sex')) {
+                    error_log("PostgreSQL Debug: Using default sex data");
+                    $em->exec("INSERT INTO mtb_sex (id, name, sort_no, discriminator_type) VALUES (1, '男性', 1, 'sex')");
+                    $em->exec("INSERT INTO mtb_sex (id, name, sort_no, discriminator_type) VALUES (2, '女性', 2, 'sex')");
+                }
+            }
+            
+            // 6. mtb_job の確認・復旧（顧客データに必要）
+            $jobCount = $em->fetchOne('SELECT COUNT(*) FROM mtb_job');
+            if ($jobCount == 0) {
+                error_log("PostgreSQL Debug: Restoring mtb_job from CSV or default");
+                if (!$this->restoreFromCSV($em, $csvDir, 'mtb_job')) {
+                    error_log("PostgreSQL Debug: Using default job data");
+                    $jobs = [
+                        [1, '会社員', 1],
+                        [2, '自営業', 2],
+                        [3, '学生', 3],
+                        [4, '主婦', 4],
+                        [5, 'その他', 5]
+                    ];
+                    foreach ($jobs as $job) {
+                        $em->exec("INSERT INTO mtb_job (id, name, sort_no, discriminator_type) VALUES ({$job[0]}, '{$job[1]}', {$job[2]}, 'job')");
+                    }
+                }
+            }
+            
+            // 7. mtb_customer_status の確認・復旧（顧客データに必要）
+            $customerStatusCount = $em->fetchOne('SELECT COUNT(*) FROM mtb_customer_status');
+            if ($customerStatusCount == 0) {
+                error_log("PostgreSQL Debug: Restoring mtb_customer_status from CSV or default");
+                if (!$this->restoreFromCSV($em, $csvDir, 'mtb_customer_status')) {
+                    error_log("PostgreSQL Debug: Using default customer status data");
+                    $em->exec("INSERT INTO mtb_customer_status (id, name, sort_no, discriminator_type) VALUES (1, '仮会員', 1, 'customerstatus')");
+                    $em->exec("INSERT INTO mtb_customer_status (id, name, sort_no, discriminator_type) VALUES (2, '本会員', 2, 'customerstatus')");
+                    $em->exec("INSERT INTO mtb_customer_status (id, name, sort_no, discriminator_type) VALUES (3, '退会', 3, 'customerstatus')");
+                }
+            }
+            
+            // 8. mtb_rounding_type の確認・復旧
             $roundingCount = $em->fetchOne('SELECT COUNT(*) FROM mtb_rounding_type');
             if ($roundingCount == 0) {
                 error_log("PostgreSQL Debug: Restoring mtb_rounding_type from CSV or default");
@@ -2476,6 +2582,14 @@ class ConfigController extends AbstractController
 
                 $data = array_combine($header, $row);
                 $data = $this->dataMigrationService->convertNULL($data);
+
+                // discriminator_type が必要だが存在しない場合は追加
+                if (!array_key_exists('discriminator_type', $data) && 
+                    (strpos($tableName, 'mtb_') === 0 || strpos($tableName, 'dtb_') === 0)) {
+                    $search = ['dtb_', 'mtb_', '_'];
+                    $data['discriminator_type'] = str_replace($search, '', $tableName);
+                    error_log("PostgreSQL Debug: Added discriminator_type '{$data['discriminator_type']}' for table $tableName");
+                }
 
                 // INSERT文を構築
                 $columns = implode(', ', array_keys($data));
@@ -2739,14 +2853,23 @@ class ConfigController extends AbstractController
                 $this->saveToO($em, $csvDir, 'dtb_order');
             });
             
-            $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
-                $this->saveToO($em, $csvDir, 'dtb_order_item');
-            });
+            // dtb_order_itemの処理はバージョンに応じて適切な方法で実行
+            if ($this->dataMigrationService->isVersion('4.0/4.1') || $this->dataMigrationService->isVersion('3')) {
+                $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                    $this->saveToO($em, $csvDir, 'dtb_order_item');
+                });
+            } else {
+                // 2.x系では dtb_order_detail から dtb_order_item に変換
+                $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
+                    $this->saveToO($em, $csvDir, 'dtb_order_detail', 'dtb_order_item', true);
+                });
+            }
             
             $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
                 $this->saveToO($em, $csvDir, 'dtb_shipping');
             });
             
+            // dtb_mail_historyの処理もバージョンに応じて適切に処理
             if ($this->dataMigrationService->isVersion('4.0/4.1') || $this->dataMigrationService->isVersion('3')) {
                 $this->executeWithTransactionReset($em, function() use ($em, $csvDir) {
                     $this->saveToO($em, $csvDir, 'dtb_mail_history');

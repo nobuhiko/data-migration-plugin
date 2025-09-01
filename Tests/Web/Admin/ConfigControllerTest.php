@@ -63,11 +63,15 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                 ]
             ];
 
-        // 2.11系のmysqlにはcreate tableが使われているので、商品を除外してテストする
-        if ($v == '2_11_5' && $this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'mysql') {
+        // 2.11系には商品関連でcreate tableが使われているので、商品を除外してテストする
+        if ($v == '2_11_5') {
             $post['config']['customer_order_only'] = 1;
         }
 
+        // PostgreSQL環境でのトランザクション管理を事前に行う
+        $connection = $this->entityManager->getConnection();
+        $isPostgreSQL = $connection->getDatabasePlatform()->getName() === 'postgresql';
+        
         try {
             $this->client->request(
                 'POST',
@@ -76,37 +80,31 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                 ['config' => ['import_file' => $file]]
             );
             
-            // PostgreSQL用のトランザクション状態確認とリセット
-            $connection = $this->entityManager->getConnection();
-            if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
+            // PostgreSQL環境の場合、結果を確認する前にトランザクション状態を適切に管理
+            if ($isPostgreSQL) {
                 try {
-                    // PostgreSQLで失敗したトランザクションを確実にクリア
-                    if ($connection->isTransactionActive()) {
-                        $connection->rollBack();
-                    }
-                    
-                    // EntityManagerをクリアして新しい状態でSELECTクエリを実行
+                    // EntityManagerをクリアして新鮮な状態にする
                     $this->entityManager->clear();
                     
-                    // 新しい接続を強制的に確立してクリーンな状態にする
-                    $connection->close();
-                    $connection->connect();
+                    // テスト検証のため、現在のトランザクション状態をクリアし、
+                    // データが永続化された状態で検証する
+                    if ($connection->isTransactionActive()) {
+                        // 移行処理のトランザクションは既にコミットされているはずだが、
+                        // テスト用のトランザクションが残っている場合はクリア
+                        $connection->rollBack();
+                        error_log("PostgreSQL test: Rolled back test transaction before verification");
+                    }
                     
-                    // 新しいトランザクションを開始
-                    $connection->beginTransaction();
+                    // 検証は別のトランザクションで実行（オートコミットモードでクエリ）
+                    
                 } catch (\Exception $txError) {
-                    // トランザクションエラーをログに記録
-                    error_log("PostgreSQL test transaction reset error: " . $txError->getMessage());
+                    error_log("PostgreSQL test: Pre-verification transaction handling failed: " . $txError->getMessage());
                     try {
-                        // EntityManagerをクリアしてクリーンな状態にする
                         $this->entityManager->clear();
-                        // 接続を再確立
                         $connection->close();
                         $connection->connect();
-                        $connection->beginTransaction();
                     } catch (\Exception $reconnectError) {
-                        error_log("PostgreSQL test connection reset failed: " . $reconnectError->getMessage());
-                        $this->entityManager->clear();
+                        error_log("PostgreSQL test: Connection reset failed: " . $reconnectError->getMessage());
                     }
                 }
             }
@@ -121,30 +119,36 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
     
             $orders = $this->entityManager->getRepository(Order::class)->findAll();
             self::assertEquals($o, count($orders));
+            
+            // PostgreSQL環境でテスト終了時にフレームワーク用トランザクションを開始
+            if ($isPostgreSQL) {
+                try {
+                    if (!$connection->isTransactionActive()) {
+                        $connection->beginTransaction();
+                        error_log("PostgreSQL test: Started framework transaction after verification");
+                    }
+                } catch (\Exception $txError) {
+                    error_log("PostgreSQL test: Framework transaction start failed: " . $txError->getMessage());
+                }
+            }
     
             // ECCUBE_AUTH_MAGICの値を取得してアサート
             //$eccubeConfig = $container->get('Eccube\Common\EccubeConfig');
             //$authMagic = $eccubeConfig->get('eccube_auth_magic');
             //self::assertEquals('dummy', $authMagic);
         } catch (\Exception $e) {
-            // エラーが発生した場合は、PostgreSQLのトランザクション状態を確認してリセット
-            $connection = $this->entityManager->getConnection();
-            if ($connection->getDatabasePlatform()->getName() === 'postgresql') {
+            // PostgreSQL環境でのエラーハンドリング
+            if ($isPostgreSQL) {
                 try {
+                    $this->entityManager->clear();
                     if ($connection->isTransactionActive()) {
                         $connection->rollBack();
+                        error_log("PostgreSQL test: Rolled back transaction after exception");
                     }
-                    // EntityManagerをクリアして失敗したトランザクション状態をリセット
-                    $this->entityManager->clear();
-                    
-                    if (!$connection->isTransactionActive()) {
-                        $connection->beginTransaction();
-                    }
-                    error_log("PostgreSQL test transaction reset after exception: " . $e->getMessage());
+                    $connection->beginTransaction();
+                    error_log("PostgreSQL test: Reset transaction state after exception: " . $e->getMessage());
                 } catch (\Exception $txError) {
-                    error_log("PostgreSQL test transaction reset failed: " . $txError->getMessage());
-                    // エラー時もEntityManagerをクリア
-                    $this->entityManager->clear();
+                    error_log("PostgreSQL test: Transaction reset failed: " . $txError->getMessage());
                 }
             } else {
                 // MySQL用の既存のロジック

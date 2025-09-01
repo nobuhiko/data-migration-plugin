@@ -533,26 +533,27 @@ class DataMigrationService
      */
     private function insertMinimalMasterData($em, $tableName)
     {
-        // 各マスタテーブルに応じた最小限のデータ挿入
+        // 各マスタテーブルに応じた最小限のデータ挿入（discriminator_typeを含む）
         switch ($tableName) {
             case 'mtb_customer_status':
-                $em->exec("INSERT INTO mtb_customer_status (id, name, sort_no) VALUES (1, '仮会員', 1), (2, '本会員', 2) ON CONFLICT (id) DO NOTHING");
+                $em->exec("INSERT INTO mtb_customer_status (id, name, sort_no, discriminator_type) VALUES (1, '仮会員', 1, 'customerstatus'), (2, '本会員', 2, 'customerstatus') ON CONFLICT (id) DO NOTHING");
                 break;
             case 'mtb_sex':
-                $em->exec("INSERT INTO mtb_sex (id, name, sort_no) VALUES (1, '男性', 1), (2, '女性', 2) ON CONFLICT (id) DO NOTHING");
+                $em->exec("INSERT INTO mtb_sex (id, name, sort_no, discriminator_type) VALUES (1, '男性', 1, 'sex'), (2, '女性', 2, 'sex') ON CONFLICT (id) DO NOTHING");
                 break;
             case 'mtb_job':
-                $em->exec("INSERT INTO mtb_job (id, name, sort_no) VALUES (1, '会社員', 1) ON CONFLICT (id) DO NOTHING");
+                $em->exec("INSERT INTO mtb_job (id, name, sort_no, discriminator_type) VALUES (1, '会社員', 1, 'job'), (2, '自営業', 2, 'job') ON CONFLICT (id) DO NOTHING");
                 break;
             case 'mtb_pref':
-                $em->exec("INSERT INTO mtb_pref (id, name, sort_no) VALUES (1, '北海道', 1), (13, '東京都', 13) ON CONFLICT (id) DO NOTHING");
+                $em->exec("INSERT INTO mtb_pref (id, name, sort_no, discriminator_type) VALUES (1, '北海道', 1, 'pref'), (13, '東京都', 13, 'pref') ON CONFLICT (id) DO NOTHING");
                 break;
             case 'mtb_country':
-                $em->exec("INSERT INTO mtb_country (id, name, sort_no) VALUES (392, '日本', 1) ON CONFLICT (id) DO NOTHING");
+                $em->exec("INSERT INTO mtb_country (id, name, sort_no, discriminator_type) VALUES (392, '日本', 1, 'country') ON CONFLICT (id) DO NOTHING");
                 break;
             default:
                 error_log("PostgreSQL: No minimal data defined for master table: $tableName");
         }
+        error_log("PostgreSQL: Inserted minimal data for master table: $tableName");
     }
     
     /**
