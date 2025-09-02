@@ -48,6 +48,8 @@ class ConfigController extends AbstractController
     protected $shipping_order = [];
     /** @var array */
     protected $customer_point = [];
+    protected $memberIdSet = null; // array<int,bool>
+    protected $missingCreatorIds = []; // array<int,bool>
 
     /**
      * constructor.
@@ -125,6 +127,19 @@ class ConfigController extends AbstractController
                     // 会員・受注のみ移行
                     $this->saveCustomerAndOrder($em, $csvDir);
                 } else {
+                    // 権限/メンバーは最終的に UPSERT (PostgreSQL) / 再投入 (MySQL)。
+                    // dtb_member は一旦全件を非稼働(work_id=0)にした上で CSV の内容を反映。
+                    $this->upsertAuthorityAndMember($em, $csvDir);
+                    $this->collectMissingCreatorIds($csvDir, [
+                        'dtb_delivery',
+                        'dtb_delivery_time',
+                        'dtb_delivery_fee',
+                        'dtb_payment',
+                        'dtb_order',
+                        'dtb_shipping',
+                        'dtb_mail_history'
+                    ]);
+
                     // 全データ移行
                     $this->saveCustomer($em, $csvDir);
                     $this->saveProduct($em, $csvDir);
@@ -140,7 +155,6 @@ class ConfigController extends AbstractController
             // 削除
             $fs = new Filesystem();
             $fs->remove($tmpDir);
-
             // .envのECCUBE_AUTH_MAGICを書き換える
             $this->dataMigrationService->updateEnv($form['auth_magic']->getData());
 
@@ -162,10 +176,21 @@ class ConfigController extends AbstractController
     }
 
 
-
     private function saveCustomerAndOrder($em, $csvDir)
     {
-        $platform = $this->dataMigrationService->begin($em);
+        $platform = $this->dataMigrationService->begin($em, "CustomerAndOrder");
+
+        // 先に権限/メンバーを反映し creator_id の参照整合性を確保
+        //$this->upsertAuthorityAndMember($em, $csvDir);
+        $this->collectMissingCreatorIds($csvDir, [
+            'dtb_delivery',
+            'dtb_delivery_time',
+            'dtb_delivery_fee',
+            'dtb_payment',
+            'dtb_order',
+            'dtb_shipping',
+            'dtb_mail_history'
+        ]);
 
         // 会員
         $this->saveToC($em, $csvDir, 'dtb_customer');
@@ -225,7 +250,7 @@ class ConfigController extends AbstractController
         // 会員系
         if (file_exists($csvDir . 'dtb_customer.csv') && filesize($csvDir . 'dtb_customer.csv') > 0) {
 
-            $platform = $this->dataMigrationService->begin($em);
+            $platform = $this->dataMigrationService->begin($em, "Customer");
 
             $this->saveToC($em, $csvDir, 'mtb_job', null, true);
             $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
@@ -245,8 +270,7 @@ class ConfigController extends AbstractController
                 $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1);
             }
 
-            $this->saveToC($em, $csvDir, 'mtb_authority', null, true);
-            $this->saveToC($em, $csvDir, 'dtb_member', null, true);
+
 
             if ($platform == 'mysql') {
                 $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
@@ -268,55 +292,35 @@ class ConfigController extends AbstractController
         $tableName = ($tableName) ? $tableName : $csvName;
         $this->dataMigrationService->resetTable($em, $tableName);
 
-        if (file_exists($tmpDir . $csvName . '.csv') == false) {
-            // 無視する
-            //$this->addDanger($csvName.'.csv が見つかりませんでした' , 'admin');
-            return;
+        if (!file_exists($tmpDir . $csvName . '.csv')) {
+            return; // CSV 無し
         }
-        if (filesize($tmpDir . $csvName . '.csv') == 0) {
-            // 無視する
-            return;
+        if (filesize($tmpDir . $csvName . '.csv') === 0) {
+            return; // 空
         }
 
         if (($handle = fopen($tmpDir . $csvName . '.csv', 'r')) !== false) {
-            // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
             $key = fgetcsv($handle);
-            // phpmyadminのcsvに余計なスペースが入っているので取り除く
             $key = array_filter(array_map('trim', $key));
 
-            $keySize = count($key);
             $columns = $em->getSchemaManager()->listTableColumns($tableName);
-
             $listTableColumns = [];
             foreach ($columns as $column) {
-                $columnName = $column->getName();
-                if ($tableName === 'dtb_member') {
-                    if ($columnName === 'two_factor_auth_key' || $columnName === 'two_factor_auth_enabled') {
-                        continue;
-                    }
-                }
-                $listTableColumns[] = $columnName;
+                $listTableColumns[] = $column->getName();
             }
 
             $builder = new BulkInsertQuery($em, $tableName);
             $builder->setColumns($listTableColumns);
-
             $batchSize = 20;
 
             while (($row = fgetcsv($handle)) !== false) {
                 $value = [];
-
-                // 1行目をkeyとした配列を作る
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
 
-                // PostgreSQL対応: 数値フィールドの空文字をNULLに変換
-                $data = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $data);
-
-                // Schemaにあわせた配列を作成する
                 foreach ($listTableColumns as $column) {
                     if ($this->dataMigrationService->isVersion('4.0/4.1') == true) {
-                        if ($column == 'buy_times') {
-                            $value[$column] = isset($data[$column]) ? $data[$column] : 0;
+                        if ($column == 'sort_no') {
+                            $value[$column] = !empty($data[$column]) ? $data[$column] : 0;
                         } elseif ($column == 'creator_id') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 1;
                         } elseif ($column == 'create_date' || $column == 'update_date') {
@@ -334,7 +338,6 @@ class ConfigController extends AbstractController
                         if ($column == 'id' && $tableName == 'dtb_customer') { // fixme
                             $value[$column] = $data['customer_id'];
                         } elseif ($column == 'customer_status_id') {
-                            // 退会が追加された
                             $value[$column] = ($data['del_flg'] == 1) ? '3' : $data['status'];
                         } elseif ($column == 'postal_code') {
                             $value[$column] = mb_substr(mb_convert_kana($data['zip01'] . $data['zip02'], 'a'), 0, 8);
@@ -342,23 +345,21 @@ class ConfigController extends AbstractController
                                 $value[$column] = null;
                             }
                         } elseif ($column == 'phone_number') {
-                            $value[$column] = mb_substr(mb_convert_kana($data['tel01'] . $data['tel02'] . $data['tel03'], 'a'), 0, 14); //14文字制限
+                            $value[$column] = mb_substr(mb_convert_kana($data['tel01'] . $data['tel02'] . $data['tel03'], 'a'), 0, 14);
                             if (empty($value[$column])) {
                                 $value[$column] = null;
                             }
                         } elseif ($column == 'sex_id') {
                             $value[$column] = empty($data['sex']) ? null : $data['sex'];
                         } elseif ($column == 'job_id') {
-                            $value[$column] = empty($data['job']) ? null : $data['job']; // 0が入っている場合あり?
+                            $value[$column] = empty($data['job']) ? null : $data['job'];
                         } elseif ($column == 'pref_id') {
                             $value[$column] = empty($data['pref']) ? null : $data['pref'];
                         } elseif ($column == 'work_id') {
-                            // 削除されているメンバーは非稼働で登録
                             $value[$column] = ($data['del_flg'] == 1) ? 0 : $data['work'];
                         } elseif ($column == 'authority_id') {
                             $value[$column] = $data['authority'];
                         } elseif ($column == 'email') {
-                            // 退会時はランダムな値に更新
                             if ($data['del_flg'] == 1) {
                                 $value[$column] = StringUtil::random(60) . '@dummy.dummy';
                             } else {
@@ -367,35 +368,29 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'password' || $column == 'name01' || $column == 'name02') {
                             $value[$column] = empty($data[$column]) ? 'Not null violation' : $data[$column];
                         } elseif ($column == 'sort_no') {
-                            if ($this->dataMigrationService->isVersion('4.0/4.1') == true) {
-                                $value[$column] = $data['sort_no'];
-                            } else {
-                                $value[$column] = $data['rank'];
-                            }
+                            $value[$column] = $this->dataMigrationService->isVersion('4.0/4.1') ? $data['sort_no'] : $data['rank'];
                         } elseif ($column == 'create_date' || $column == 'update_date') {
                             $value[$column] = (isset($data[$column]) && $data[$column] != '0000-00-00 00:00:00') ? self::convertTz($data[$column]) : date('Y-m-d H:i:s');
                         } elseif ($column == 'login_date' || $column == 'first_buy_date') {
                             $value[$column] = (!empty($data[$column]) && $data[$column] != '0000-00-00 00:00:00') ? self::convertTz($data[$column]) : null;
-                        } elseif ($column == 'secret_key') { // 実験
+                        } elseif ($column == 'secret_key') {
                             $value[$column] = uniqid('secret_key_' . mt_rand() . '.', true);
                         } elseif ($column == 'point') {
-
                             if ($this->dataMigrationService->isVersion('3') == true && isset($this->customer_point[$data['customer_id']])) {
                                 $value[$column] = $this->customer_point[$data['customer_id']]['plg_point_current'];
                             } else {
                                 $value[$column] = empty($data[$column]) ? 0 : (int) $data[$column];
                             }
                         } elseif ($column == 'salt') {
-                            $value[$column] = !empty($data[$column]) ? $data[$column] : null;  // @see https://github.com/EC-CUBE/data-migration-plugin/issues/38
+                            $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         } elseif ($column == 'creator_id') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 1;
                         } elseif ($column == 'plg_mailmagazine_flg') {
-                            $value[$column] = (!empty($data['mailmaga_flg']) && $data['mailmaga_flg'] != 3) ? 1 : 0; // メルマガプラグイン
+                            $value[$column] = (!empty($data['mailmaga_flg']) && $data['mailmaga_flg'] != 3) ? 1 : 0;
                         } elseif ($column == 'id' && $tableName == 'dtb_member') {
                             $value[$column] = $data['member_id'];
                         } elseif ($column == 'id' && $tableName == 'dtb_customer_address') {
-                            // カラム名が違うので
-                            $value[$column] = $i;
+                            $value[$column] = $i; // 連番
                         } elseif ($column == 'discriminator_type') {
                             $search = ['dtb_', 'mtb_', '_'];
                             $value[$column] = str_replace($search, '', $tableName);
@@ -406,10 +401,8 @@ class ConfigController extends AbstractController
                         }
                     }
                 }
-                
-                // PostgreSQL対応: 最終チェックで数値フィールドの空文字をNULLに変換
+
                 $value = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $value);
-                
                 $builder->setValues($value);
 
                 if (($i % $batchSize) === 0) {
@@ -422,7 +415,6 @@ class ConfigController extends AbstractController
                         throw $e;
                     }
                 }
-
                 $i++;
             }
 
@@ -437,8 +429,7 @@ class ConfigController extends AbstractController
             }
 
             fclose($handle);
-
-            return $i; // indexを返す
+            return $i; // index
         }
     }
 
@@ -453,32 +444,20 @@ class ConfigController extends AbstractController
         }
 
         if (file_exists($csvDir . $product_db_name . '.csv') && filesize($csvDir . $product_db_name . '.csv') > 0) {
-            $platform = $this->dataMigrationService->begin($em);
+            $platform = $this->dataMigrationService->begin($em, "Product");
 
             // 2.11系の処理
             if (file_exists($csvDir . 'dtb_class_combination.csv')) {
                 $this->fix211classCombination($em, $platform, $csvDir);
             }
 
-            if ($this->dataMigrationService->isVersion('4.0/4.1')) {
-                $this->saveToC($em, $csvDir, 'mtb_product_status', null, true);
-                $this->saveToC($em, $csvDir, 'mtb_sale_type', null, true);
-                $this->saveToP($em, $csvDir, 'dtb_product');
-                $this->saveToO($em, $csvDir, 'dtb_delivery_duration', null, true);
-                $this->saveToP($em, $csvDir, 'dtb_product_class');
-                $this->saveToP($em, $csvDir, 'dtb_class_category');
+            if ($this->dataMigrationService->isVersion('3')) {
+                // 依存関係順: class_name -> class_category -> category -> product -> product_class / others
                 $this->saveToP($em, $csvDir, 'dtb_class_name');
-                $this->saveToP($em, $csvDir, 'dtb_product_category');
-                $this->saveToP($em, $csvDir, 'dtb_product_stock');
-                $this->saveToP($em, $csvDir, 'dtb_product_image');
-                $this->saveToP($em, $csvDir, 'dtb_tag');
-                $this->saveToP($em, $csvDir, 'dtb_product_tag');
-                $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
-            } else if ($this->dataMigrationService->isVersion('3')) {
+                $this->saveToP($em, $csvDir, 'dtb_class_category');
+                $this->saveToP($em, $csvDir, 'dtb_category');
                 $this->saveToP($em, $csvDir, 'dtb_product');
                 $this->saveToP($em, $csvDir, 'dtb_product_class');
-                $this->saveToP($em, $csvDir, 'dtb_class_category');
-                $this->saveToP($em, $csvDir, 'dtb_class_name');
                 $this->saveToP($em, $csvDir, 'dtb_product_category');
                 $this->saveToP($em, $csvDir, 'dtb_product_stock');
                 $this->saveToP($em, $csvDir, 'dtb_product_image');
@@ -486,25 +465,25 @@ class ConfigController extends AbstractController
                 $this->saveToP($em, $csvDir, 'mtb_tag', 'dtb_tag');
                 $this->saveToP($em, $csvDir, 'dtb_customer_favorite_product');
             } else {
-                $this->saveToP($em, $csvDir, 'dtb_products', 'dtb_product');
-                $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');
-                $this->saveToP($em, $csvDir, 'dtb_classcategory', 'dtb_class_category');
-                $this->saveToP($em, $csvDir, 'dtb_class', 'dtb_class_name');
-                $this->saveToP($em, $csvDir, 'dtb_product_categories', 'dtb_product_category');
-                $this->saveToP($em, $csvDir, 'dtb_product_status', 'dtb_product_tag');
-                $this->saveToP($em, $csvDir, 'mtb_status', 'dtb_tag');
-
-                $this->saveToP($em, $csvDir, 'dtb_customer_favorite_products', 'dtb_customer_favorite_product');
-
-                // 在庫
+                // 4.x 系 正しい依存関係順:
+                // class_name(dtb_class) -> class_category -> category -> product -> product_class -> product_category -> tag -> product_tag -> favorites
+                $this->saveToP($em, $csvDir, 'dtb_class', 'dtb_class_name');                 // 親: class
+                $this->saveToP($em, $csvDir, 'dtb_classcategory', 'dtb_class_category');     // 参照: class
+                $this->saveToP($em, $csvDir, 'dtb_category');                               // category (product_category が参照)
+                $this->saveToP($em, $csvDir, 'dtb_products', 'dtb_product');                 // product (以降の多くが参照)
+                $this->saveToP($em, $csvDir, 'dtb_products_class', 'dtb_product_class');     // 参照: product + class_category
+                $this->saveToP($em, $csvDir, 'dtb_product_categories', 'dtb_product_category'); // 参照: product + category
+                $this->saveToP($em, $csvDir, 'mtb_status', 'dtb_tag');                       // タグ (product_tag が参照?)
+                $this->saveToP($em, $csvDir, 'dtb_product_status', 'dtb_product_tag');       // product_tag (参照: product + tag)
+                $this->saveToP($em, $csvDir, 'dtb_customer_favorite_products', 'dtb_customer_favorite_product'); // 参照: product
+                // 在庫 (product_class 参照済み後)
                 $this->saveStock($em);
-                // 画像
+                // 画像 (product 参照)
                 $this->saveProductImage($em);
             }
-
-            $this->saveToP($em, $csvDir, 'dtb_category');
             if (file_exists($csvDir . 'mtb_product_type.csv')) {
-                $this->saveToP($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
+                // デフォルト判定により discriminator / rank->sort_no マッピングは upsertMaster 内で自動適用
+                $this->upsertMaster($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
             }
 
             // 削除済み商品を4系のデータ構造に合わせる
@@ -524,6 +503,10 @@ class ConfigController extends AbstractController
                 $this->dataMigrationService->setIdSeq($em, 'dtb_product_tag');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_tag');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_customer_favorite_product');
+                // PostgreSQLで mtb_sale_type をUPSERTした場合もシーケンス同期
+                if (file_exists($csvDir . 'mtb_product_type.csv')) {
+                    $this->dataMigrationService->setIdSeq($em, 'mtb_sale_type');
+                }
             }
 
             $em->commit();
@@ -537,6 +520,7 @@ class ConfigController extends AbstractController
     private function saveToP($em, $tmpDir, $csvName, $tableName = null, $allow_zero = false, $i = 1)
     {
         $tableName = ($tableName) ? $tableName : $csvName;
+        // 通常: 既存のフルリセット (UPsert 対象マスタは saveProduct から upsertMaster 経由で別処理済)
         $this->dataMigrationService->resetTable($em, $tableName);
 
         if (file_exists($tmpDir . $csvName . '.csv') == false) {
@@ -574,6 +558,57 @@ class ConfigController extends AbstractController
 
                 // PostgreSQL対応: 数値フィールドの空文字をNULLに変換
                 $data = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $data);
+
+                // --- 前処理: リレーション整合性クレンジング (saveToP) ---
+                if ($tableName === 'dtb_class_category') {
+                    // class_name_id=0 もしくは class_id=0 (旧データ) は未設定扱いでスキップ
+                    if ((isset($data['class_name_id']) && (int)$data['class_name_id'] === 0) || (isset($data['class_id']) && (int)$data['class_id'] === 0)) {
+                        continue; // 次行へ
+                    }
+                }
+                if ($tableName === 'dtb_product_class') {
+                    // 存在しないカテゴリ参照は NULL に変更
+                    foreach (['class_category_id1', 'class_category_id2', 'classcategory_id1', 'classcategory_id2'] as $catCol) {
+                        if (isset($data[$catCol]) && $data[$catCol] !== null && $data[$catCol] !== '') {
+                            $catId = (int)$data[$catCol];
+                            if ($catId === 0) {
+                                $data[$catCol] = null;
+                            } else {
+                                $exists = $em->fetchOne('SELECT 1 FROM dtb_class_category WHERE id = ?', [$catId]);
+                                if (!$exists) {
+                                    $data[$catCol] = null;
+                                }
+                            }
+                        }
+                    }
+                }
+                // --- 前処理ここまで ---
+
+                // --- 前処理: リレーション整合性クレンジング ---
+                if ($tableName === 'dtb_class_category') {
+                    // class_name_id=0 は旧データの未設定値なのでスキップ
+                    if (isset($data['class_name_id']) && (int)$data['class_name_id'] === 0) {
+                        continue; // 次行へ
+                    }
+                }
+                if ($tableName === 'dtb_product_class') {
+                    // 存在しないカテゴリ参照は NULL に変更
+                    foreach (['class_category_id1', 'class_category_id2'] as $catCol) {
+                        if (isset($data[$catCol]) && $data[$catCol] !== null && $data[$catCol] !== '') {
+                            $catId = (int)$data[$catCol];
+                            if ($catId === 0) {
+                                $data[$catCol] = null;
+                            } else {
+                                $exists = $em->fetchOne('SELECT 1 FROM dtb_class_category WHERE id = ?', [$catId]);
+                                if (!$exists) {
+                                    $data[$catCol] = null;
+                                }
+                            }
+                        }
+                    }
+                }
+                // --- 前処理ここまで ---
+
 
                 if ($this->dataMigrationService->isVersion('3')) {
                     if (isset($data['class_category_id1'])) {
@@ -807,6 +842,298 @@ class ConfigController extends AbstractController
             fclose($handle);
 
             return $i; // indexを返す
+        }
+    }
+
+    /**
+     * 共通: PostgreSQL 用 mtb_* マスタ UPSERT 処理
+     * options:
+     *  - discriminator: string  discriminator_type の値
+     *  - columnMappings: ['sourceCsvCol' => 'targetCol']  CSV->DB マッピング (存在しなければスキップ)
+     */
+    private function upsertMasterFromCsv($em, $dir, $csvName, $tableName, array $options = [])
+    {
+        $file = $dir . $csvName . '.csv';
+        if (!file_exists($file) || filesize($file) === 0) {
+            return 0;
+        }
+        if (($handle = fopen($file, 'r')) === false) {
+            return 0;
+        }
+        $key = fgetcsv($handle);
+        $key = array_filter(array_map('trim', $key));
+        if (empty($key)) {
+            fclose($handle);
+            return 0;
+        }
+        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $listTableColumns = [];
+        foreach ($columns as $column) {
+            $listTableColumns[] = $column->getName();
+        }
+        $updateCols = array_filter($listTableColumns, function ($c) {
+            return $c !== 'id' && $c !== 'create_date';
+        });
+        $discriminator = $options['discriminator'] ?? null;
+        $colMap = $options['columnMappings'] ?? [];
+        $rowCount = 0;
+        $now = date('Y-m-d H:i:s');
+        while (($row = fgetcsv($handle)) !== false) {
+            $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
+            $data = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $data);
+            // 任意のカラムマッピング (CSV->DB) 例: rank -> sort_no
+            foreach ($colMap as $src => $dest) {
+                if (!isset($data[$dest]) && isset($data[$src])) {
+                    $data[$dest] = $data[$src];
+                }
+            }
+            $insertValues = [];
+            foreach ($listTableColumns as $col) {
+                if ($col === 'discriminator_type') {
+                    $insertValues[$col] = $discriminator ?? ($data[$col] ?? null);
+                } elseif (array_key_exists($col, $data)) {
+                    $insertValues[$col] = $data[$col];
+                } else {
+                    $insertValues[$col] = null;
+                }
+            }
+            if (!isset($insertValues['id']) || $insertValues['id'] === '' || $insertValues['id'] === null) {
+                continue; // PK 無し
+            }
+            // name 空文字補完 (存在する場合)
+            if (array_key_exists('name', $insertValues) && ($insertValues['name'] === null || $insertValues['name'] === '')) {
+                $insertValues['name'] = '';
+            }
+            if (array_key_exists('sort_no', $insertValues) && ($insertValues['sort_no'] === null || $insertValues['sort_no'] === '')) {
+                $insertValues['sort_no'] = is_numeric($insertValues['id']) ? (int) $insertValues['id'] : 0;
+            }
+            foreach (['create_date', 'update_date'] as $dcol) {
+                if (array_key_exists($dcol, $insertValues) && ($insertValues[$dcol] === null || $insertValues[$dcol] === '' || strpos((string)$insertValues[$dcol], '0000') === 0)) {
+                    $insertValues[$dcol] = $now;
+                }
+            }
+            $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
+            $placeholders = implode(',', array_fill(0, count($insertValues), '?'));
+            $updateSql = implode(', ', array_map(function ($c) {
+                return '"' . $c . '" = EXCLUDED."' . $c . '"';
+            }, $updateCols));
+            $sql = 'INSERT INTO ' . $tableName . ' (' . $colsSql . ') VALUES (' . $placeholders . ') ON CONFLICT (id) DO UPDATE SET ' . $updateSql;
+            $em->prepare($sql)->executeStatement(array_values($insertValues));
+            $rowCount++;
+        }
+        fclose($handle);
+        return $rowCount;
+    }
+
+    /**
+     * 上位ラッパ: mtb_* マスタを PostgreSQL では UPSERT / それ以外は既存 saveToP
+     * @param string $csvName 読み取るCSV(元)ファイル名 (拡張子抜き)
+     * @param string|null $tableName 挿入先テーブル (省略時 = $csvName)
+     * @param bool $allow_zero 既存 saveToP の互換引数
+     * @param array $options upsertMasterFromCsv に渡すオプション (discriminator, columnMappings など)
+     */
+    private function upsertMaster($em, $dir, $csvName, $tableName = null, $allow_zero = false, array $options = [])
+    {
+        $tableName = $tableName ?: $csvName;
+        $isPostgres = $em->getDatabasePlatform()->getName() === 'postgresql';
+        if ($isPostgres) {
+            $mergedOptions = $this->buildMasterUpsertOptions($tableName, $options);
+            return $this->upsertMasterFromCsv($em, $dir, $csvName, $tableName, $mergedOptions);
+        }
+        // MySQL 等: 従来どおり全消し後インサート
+        return $this->saveToP($em, $dir, $csvName, $tableName, $allow_zero);
+    }
+
+    /**
+     * 指定 mtb_* テーブル向け UPSERT オプションのデフォルト構築 + マージ
+     * @param string $tableName 実テーブル名
+     * @param array $override 呼び出し側オプション(優先)
+     * @return array マージ済オプション(discriminator, columnMappings 等)
+     */
+    private function buildMasterUpsertOptions(string $tableName, array $override): array
+    {
+        // すべての mtb_* で共通: rank -> sort_no マッピングを基本付与
+        $base = [
+            'columnMappings' => ['rank' => 'sort_no'],
+        ];
+
+        // discriminator 未指定なら自動生成: mtb_ プレフィックス除去しアンダースコア除去
+        // 例) mtb_sale_type -> saletype, mtb_device_type -> devicetype
+        if (!isset($override['discriminator'])) {
+            if (strpos($tableName, 'mtb_') === 0) {
+                $discriminator = substr($tableName, 4); // プレフィックス除去
+            } else {
+                $discriminator = $tableName;
+            }
+            $discriminator = str_replace('_', '', $discriminator);
+            $base['discriminator'] = $discriminator;
+        }
+
+        // オーバーライド: columnMappings はマージ (override 優先)
+        if (isset($override['columnMappings'])) {
+            $base['columnMappings'] = array_merge($base['columnMappings'], (array)$override['columnMappings']);
+        }
+        foreach ($override as $k => $v) {
+            if ($k === 'columnMappings') {
+                continue;
+            }
+            $base[$k] = $v; // 上書き (discriminator 等)
+        }
+        return $base;
+    }
+
+    /**
+     * mtb_authority と dtb_member の最終同期:
+     *  - PostgreSQL: mtb_authority を汎用 UPSERT, その後 dtb_member をカスタム UPSERT (全件 work_id=0 強制)
+     *  - MySQL: 既存 truncate+insert(saveToC) 後に work_id=0 へ更新
+     */
+    private function upsertAuthorityAndMember($em, $dir)
+    {
+        $platform = $this->dataMigrationService->begin($em);
+        $authorityCsv = $dir . 'mtb_authority.csv';
+        $memberCsv    = $dir . 'dtb_member.csv';
+
+        $hasAuthority = file_exists($authorityCsv) && filesize($authorityCsv) > 0;
+        $hasMember    = file_exists($memberCsv) && filesize($memberCsv) > 0;
+        if (!$hasAuthority && !$hasMember) {
+            return; // どちらも無し
+        }
+
+        if ($platform === 'postgresql') {
+            if ($hasAuthority) {
+                // 権限マスタを汎用 UPSERT (discriminator 付与)
+                $this->upsertMaster($em, $dir, 'mtb_authority', null, true, [
+                    'discriminator' => 'authority'
+                ]);
+            }
+            if ($hasMember) {
+                // 既存メンバーを一旦非稼働化
+                $em->exec('UPDATE dtb_member SET work_id = 0');
+                // CSV を読み取り UPSERT
+                $file = $memberCsv;
+                if (($handle = fopen($file, 'r')) === false) {
+                    return;
+                }
+                $key = fgetcsv($handle);
+                $key = array_filter(array_map('trim', $key));
+                if (empty($key)) {
+                    fclose($handle);
+                    return;
+                }
+                $columns = $em->getSchemaManager()->listTableColumns('dtb_member');
+                $listTableColumns = [];
+                foreach ($columns as $c) {
+                    $listTableColumns[] = $c->getName();
+                }
+                $updateCols = array_filter($listTableColumns, fn($c) => $c !== 'id' && $c !== 'create_date');
+                $now = date('Y-m-d H:i:s');
+                while (($row = fgetcsv($handle)) !== false) {
+                    $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
+                    $insertValues = [];
+                    foreach ($listTableColumns as $col) {
+
+                        if ($col === 'discriminator_type') {
+                            $insertValues[$col] = $data[$col] ?? 'member';
+                            continue;
+                        }
+                        if (array_key_exists($col, $data)) {
+                            $insertValues[$col] = $data[$col];
+                        } else {
+                            $insertValues[$col] = null;
+                        }
+                    }
+                    if (!isset($insertValues['id']) || $insertValues['id'] === '') {
+                        continue; // PK無
+                    }
+                    foreach (['create_date', 'update_date'] as $dcol) {
+                        if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || strpos($insertValues[$dcol], '0000') === 0)) {
+                            $insertValues[$dcol] = $now;
+                        }
+                    }
+                    $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
+                    $placeholders = implode(',', array_fill(0, count($insertValues), '?'));
+                    $updateSql = implode(', ', array_map(fn($c) => '"' . $c . '" = EXCLUDED."' . $c . '"', $updateCols));
+                    $sql = 'INSERT INTO dtb_member (' . $colsSql . ') VALUES (' . $placeholders . ') ON CONFLICT (id) DO UPDATE SET ' . $updateSql;
+                    $em->prepare($sql)->executeStatement(array_values($insertValues));
+                }
+                fclose($handle);
+            }
+            // メンバーIDキャッシュ
+            try {
+                $ids = $em->fetchFirstColumn('SELECT id FROM dtb_member');
+                $this->memberIdSet = [];
+                foreach ($ids as $id) {
+                    $this->memberIdSet[(int)$id] = true;
+                }
+            } catch (\Exception $e) {
+                $this->memberIdSet = [];
+            }
+        } else { // MySQL 他
+            if ($hasAuthority) {
+                $this->saveToC($em, $dir, 'mtb_authority', null, true);
+            }
+            if ($hasMember) {
+                $this->saveToC($em, $dir, 'dtb_member', null, true);
+                $em->exec('UPDATE dtb_member SET work_id = 0');
+            }
+            try {
+                $ids = $em->fetchFirstColumn('SELECT id FROM dtb_member');
+                $this->memberIdSet = [];
+                foreach ($ids as $id) {
+                    $this->memberIdSet[(int)$id] = true;
+                }
+            } catch (\Exception $e) {
+                $this->memberIdSet = [];
+            }
+        }
+        $this->addSuccess('管理者データを登録しました。', 'admin');
+        $em->commit();
+    }
+
+    private function collectMissingCreatorIds(string $csvDir, array $csvNames): void
+    {
+        if ($this->memberIdSet === null) {
+            return;
+        }
+        $newMissing = [];
+        foreach ($csvNames as $name) {
+            $path = $csvDir . $name . '.csv';
+            if (!file_exists($path) || filesize($path) === 0) {
+                continue;
+            }
+            if (($h = fopen($path, 'r')) === false) {
+                continue;
+            }
+            $header = fgetcsv($h);
+            if (!$header) {
+                fclose($h);
+                continue;
+            }
+            $header = array_map('trim', $header);
+            $idx = array_search('creator_id', $header, true);
+            if ($idx === false) {
+                fclose($h);
+                continue;
+            }
+            while (($row = fgetcsv($h)) !== false) {
+                if (!isset($row[$idx]) || $row[$idx] === '' || strtoupper($row[$idx]) === 'NULL') {
+                    continue;
+                }
+                $cid = (int)$row[$idx];
+                if ($cid > 0 && !isset($this->memberIdSet[$cid])) {
+                    $newMissing[$cid] = true;
+                }
+            }
+            fclose($h);
+        }
+        if ($newMissing) {
+            foreach ($newMissing as $k => $_) {
+                $this->missingCreatorIds[$k] = true;
+            }
+            $all = array_keys($this->missingCreatorIds);
+            sort($all);
+            $preview = array_slice($all, 0, 10);
+            $this->addWarning('存在しない creator_id 検出: ' . count($all) . ' 件 (例: ' . implode(',', $preview) . (count($all) > 10 ? '...' : '') . ') は 1 にフォールバックします。', 'admin');
         }
     }
 
@@ -1074,39 +1401,37 @@ class ConfigController extends AbstractController
     {
         // 会員系
         if (file_exists($csvDir . 'dtb_order.csv') && filesize($csvDir . 'dtb_order.csv') > 0) {
-            $platform = $this->dataMigrationService->begin($em);
+            $platform = $this->dataMigrationService->begin($em, "Order");
 
             // 2.4には存在しないデータ
             if (!$this->dataMigrationService->isVersion('2.4.4')) {
-                $this->saveToO($em, $csvDir, 'mtb_device_type', null, true);
+                $this->upsertMaster($em, $csvDir, 'mtb_device_type', null, true);
             }
             // todo mtb_order_status.display_order_count
-            $this->saveToO($em, $csvDir, 'mtb_device_type', null, true);
+            $this->upsertMaster($em, $csvDir, 'mtb_device_type', null, true);
 
-            if ($this->dataMigrationService->isVersion('4.0/4.1')) {
-                $this->saveToP($em, $csvDir, 'mtb_order_status', null, true);
-                $this->saveToP($em, $csvDir, 'mtb_order_status_color', null, true);
-                $this->saveToP($em, $csvDir, 'mtb_order_item_type', null, true);
-                $this->saveToO($em, $csvDir, 'dtb_delivery_time');
-                $this->saveToO($em, $csvDir, 'dtb_delivery');
+            if ($this->dataMigrationService->isVersion('3')) {
+                // 挿入は 親→子 の順 (親が存在している必要があるため)
+                $this->saveToO($em, $csvDir, 'dtb_delivery');      // 親
+                $this->saveToO($em, $csvDir, 'dtb_delivery_time'); // 子
                 $this->saveToO($em, $csvDir, 'dtb_delivery_fee');
-                $this->saveToO($em, $csvDir, 'dtb_mail_history');
-            } else if ($this->dataMigrationService->isVersion('3')) {
-                $this->saveToO($em, $csvDir, 'dtb_delivery_time');
-                $this->saveToO($em, $csvDir, 'dtb_delivery');
-                $this->saveToO($em, $csvDir, 'dtb_delivery_fee');
+
+                $this->saveToO($em, $csvDir, 'dtb_payment');
+                $this->saveToO($em, $csvDir, 'dtb_order');
                 $this->saveToO($em, $csvDir, 'dtb_mail_history');
             } else {
-                $this->saveToO($em, $csvDir, 'dtb_delivtime', 'dtb_delivery_time');
-                $this->saveToO($em, $csvDir, 'dtb_deliv', 'dtb_delivery');
+                // 2.x 系 (dtb_deliv / dtb_delivtime) も同様に子→親削除 + 親→子挿入
+                $this->saveToO($em, $csvDir, 'dtb_deliv', 'dtb_delivery');          // 親
+                $this->saveToO($em, $csvDir, 'dtb_delivtime', 'dtb_delivery_time'); // 子
                 $this->saveToO($em, $csvDir, 'dtb_delivfee', 'dtb_delivery_fee');
+
+                $this->saveToO($em, $csvDir, 'dtb_payment');
+                $this->saveToO($em, $csvDir, 'dtb_order');
                 $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
             }
 
             // fixme dtb_delivery_time のあとにやらなければダメ
-            $this->saveToO($em, $csvDir, 'dtb_order');
             $this->saveToO($em, $csvDir, 'dtb_shipping');
-            $this->saveToO($em, $csvDir, 'dtb_payment');
 
             if (!isset($this->product_class_id)) {
                 sleep(5);
@@ -1134,6 +1459,10 @@ class ConfigController extends AbstractController
             }
 
 
+            // mtb_device_type を UPSERT した場合のシーケンス同期
+            if (file_exists($csvDir . 'mtb_device_type.csv')) {
+                $this->dataMigrationService->setIdSeq($em, 'mtb_device_type');
+            }
             if ($platform == 'mysql') {
                 $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
             } else {
@@ -1162,7 +1491,9 @@ class ConfigController extends AbstractController
     private function saveToO($em, $tmpDir, $csvName, $tableName = null, $allow_zero = false, $i = 1)
     {
         $tableName = ($tableName) ? $tableName : $csvName;
+        // 通常: リセット (UPSERT 対象は saveOrder で upsertMaster 呼び出し済のためここに来ない想定)
         $this->dataMigrationService->resetTable($em, $tableName);
+        $creatorFallbackApplied = 0;
 
         if (file_exists($tmpDir . $csvName . '.csv') == false) {
             // 無視する
@@ -1199,7 +1530,7 @@ class ConfigController extends AbstractController
 
                 // 1行目をkeyとした配列を作る
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
-                
+
                 // PostgreSQL対応: 数値フィールドの空文字をNULLに変換
                 $data = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $data);
 
@@ -1228,7 +1559,15 @@ class ConfigController extends AbstractController
                         if ($column == 'use_point') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 0;
                         } elseif ($column == 'creator_id') {
-                            $value[$column] = !empty($data[$column]) ? $data[$column] : 1;
+                            $cid = isset($data[$column]) && $data[$column] !== '' ? (int)$data[$column] : 0;
+                            if ($cid > 0 && $this->memberIdSet !== null && isset($this->memberIdSet[$cid]) && !isset($this->missingCreatorIds[$cid])) {
+                                $value[$column] = $cid;
+                            } else {
+                                if ($cid > 0 && $this->memberIdSet !== null && !isset($this->memberIdSet[$cid])) {
+                                    $creatorFallbackApplied++;
+                                }
+                                $value[$column] = 1;
+                            }
                         } elseif ($column == 'tax_adjust') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 0;
                         } elseif ($column == 'tax') {
@@ -1357,7 +1696,15 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'payment_date') {
                             $value[$column] = (!empty($data[$column]) && $data[$column] != '0000-00-00 00:00:00') ? self::convertTz($data[$column]) : null;
                         } elseif ($column == 'creator_id') {
-                            $value[$column] = !empty($data[$column]) ? $data[$column] : 1;
+                            $cid = isset($data[$column]) && $data[$column] !== '' ? (int)$data[$column] : 0;
+                            if ($cid > 0 && $this->memberIdSet !== null && isset($this->memberIdSet[$cid]) && !isset($this->missingCreatorIds[$cid])) {
+                                $value[$column] = $cid;
+                            } else {
+                                if ($cid > 0 && $this->memberIdSet !== null && !isset($this->memberIdSet[$cid])) {
+                                    $creatorFallbackApplied++;
+                                }
+                                $value[$column] = 1;
+                            }
                         } elseif ($column == 'charge' || $column == 'use_point' || $column == 'add_point' || $column == 'discount' || $column == 'total' || $column == 'subtotal' || $column == 'tax' || $column == 'payment_total') {
                             $value[$column] = !empty($data[$column]) ? (int) $data[$column] : 0;
                         } elseif ($column == 'tax_adjust') {

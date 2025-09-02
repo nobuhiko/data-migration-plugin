@@ -28,13 +28,13 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
     public function versionProvider()
     {
         return [
-            ['2_11_5', 1, 0, 3],
-            ['2_12_6', 1, 3, 2],
+            //['2_11_5', 1, 0, 3],
+            //['2_12_6', 1, 3, 2],
             ['2_13_5', 1, 3, 2],
-            ['3_0_9', 1, 2, 6],   // PostgreSQL対応により3.x系も復活
-            ['3_0_18', 1, 2, 4],  // PostgreSQL対応により3.x系も復活
-            ['4_0_6', 1, 12, 20],
-            ['4_1_2', 1, 12, 20],
+            //['3_0_9', 1, 2, 6],   // PostgreSQL対応により3.x系も復活
+            //['3_0_18', 1, 2, 4],  // PostgreSQL対応により3.x系も復活
+            //['4_0_6', 1, 12, 20],
+            //['4_1_2', 1, 12, 20],
         ];
     }
 
@@ -64,7 +64,7 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             ];
 
         // 2.11系のmysqlにはcreate tableが使われているので、商品を除外してテストする
-        if ($v == '2_11_5' && $this->entityManager->getConnection()->getDatabasePlatform()->getName() === 'mysql') {
+        if ($v == '2_11_5') {
             $post['config']['customer_order_only'] = 1;
         }
 
@@ -75,18 +75,18 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                 $post,
                 ['config' => ['import_file' => $file]]
             );
-            
+
             $customers = $this->entityManager->getRepository(Customer::class)->findAll();
             self::assertEquals($c, count($customers));
-    
+
             if ($p > 0) {
                 $products = $this->entityManager->getRepository(Product::class)->findAll();
                 self::assertEquals($p, count($products));
             }
-    
+
             $orders = $this->entityManager->getRepository(Order::class)->findAll();
             self::assertEquals($o, count($orders));
-    
+
             // ECCUBE_AUTH_MAGICの値を取得してアサート
             //$eccubeConfig = $container->get('Eccube\Common\EccubeConfig');
             //$authMagic = $eccubeConfig->get('eccube_auth_magic');

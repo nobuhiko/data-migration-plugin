@@ -171,19 +171,19 @@ class DataMigrationService
         if ($em->getDatabasePlatform()->getName() !== 'postgresql') {
             return $data;
         }
-        
-        
+
+
         try {
             $columns = $em->getSchemaManager()->listTableColumns($tableName);
             $hasConversion = false;
-            
+
             foreach ($data as $key => &$value) {
                 // 空文字またはfalseの場合にNULL変換を行う
                 if ($value === '' || $value === false) {
                     if (isset($columns[$key])) {
                         $column = $columns[$key];
                         $type = $column->getType()->getName();
-                        
+
                         // 数値型の場合、空文字またはfalseをNULLに変換
                         if (in_array($type, ['integer', 'bigint', 'smallint', 'decimal', 'float', 'numeric'])) {
                             $value = null;
@@ -197,14 +197,12 @@ class DataMigrationService
                     }
                 }
             }
-            
-            
         } catch (\Exception $e) {
             error_log("Error in convertDataTypesForPostgreSQL for table '$tableName': " . $e->getMessage());
             error_log("Data being processed: " . json_encode($data));
             // エラーが発生した場合は元のデータをそのまま返す
         }
-        
+
         return $data;
     }
 
@@ -265,7 +263,7 @@ class DataMigrationService
                     );');
     }
 
-    public function begin($em)
+    public function begin($em, $context = NULL)
     {
         $em->beginTransaction();
         $platform = $em->getDatabasePlatform()->getName();
@@ -274,12 +272,40 @@ class DataMigrationService
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } else {
-            // PostgreSQLの場合、外部キー制約を無効化
             try {
-                $em->exec('SET session_replication_role = replica;'); // need super user
+                switch ($context) {
+                    case "Customer":
+                        $targetTables = ['dtb_customer', 'dtb_customer_address'];
+                        break;
+                    case "Product":
+                        $targetTables = ['dtb_product', 'dtb_product_class', 'dtb_product_image', 'dtb_product_category', 'dtb_class_category'];
+                        break;
+                    case "Order":
+                        $targetTables = ['dtb_order', 'dtb_order_detail', 'dtb_delivery', 'dtb_mail_history', 'dtb_payment'];
+                        break;
+                    case "CustomerAndOrder":
+                        $targetTables = ['dtb_customer', 'dtb_customer_address', 'dtb_order', 'dtb_order_detail', 'dtb_mail_history'];
+                        break;
+                    default:
+                        $targetTables = [];
+                        break;
+                }
+
+                $existing = [];
+                foreach ($targetTables as $t) {
+                    $exists = $em->fetchOne("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=?", [$t]);
+                    if ($exists) {
+                        $existing[] = '"' . str_replace('"', '""', $t) . '"';
+                    }
+                }
+                if ($existing) {
+                    // PostgreSQL TRUNCATE 構文: TRUNCATE TABLE ... [ RESTART IDENTITY | CONTINUE IDENTITY ] [ CASCADE | RESTRICT ]
+                    // 順序は RESTART IDENTITY が先、その後に CASCADE
+                    $sql = 'TRUNCATE TABLE ' . implode(', ', $existing) . ' RESTART IDENTITY CASCADE;';
+                    $em->exec($sql);
+                }
             } catch (\Exception $e) {
-                // スーパーユーザー権限がない場合はエラーログを出力
-                error_log('Warning: Could not set session_replication_role to replica. Foreign key constraints remain active.');
+                error_log('Warning: TRUNCATE CASCADE (dtb_customer, dtb_member) failed: ' . $e->getMessage());
             }
         }
 
@@ -851,6 +877,33 @@ class DataMigrationService
 
             while (($row = fgetcsv($handle)) !== false) {
                 $data = $this->convertNULL(array_combine($key, $row));
+
+                // --- 前処理: リレーション整合性クレンジング ---
+                switch ($tableName) {
+                    case 'dtb_class_category':
+                        // class_name_id=0 (旧データの未設定値) はスキップ
+                        if (isset($data['class_name_id']) && (int)$data['class_name_id'] === 0) {
+                            continue 2; // 次の行へ
+                        }
+                        break;
+                    case 'dtb_product_class':
+                        // 存在しないカテゴリIDは NULL に変更 (外部キー違反防止)
+                        foreach (['class_category_id1', 'class_category_id2'] as $catCol) {
+                            if (isset($data[$catCol]) && $data[$catCol] !== null && $data[$catCol] !== '') {
+                                $catId = (int)$data[$catCol];
+                                if ($catId === 0) {
+                                    $data[$catCol] = null;
+                                } else {
+                                    $exists = $em->fetchOne('SELECT 1 FROM dtb_class_category WHERE id = ?', [$catId]);
+                                    if (!$exists) {
+                                        $data[$catCol] = null;
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                }
+                // --- 前処理ここまで ---
 
                 if ($save_flag) {
                     $this->$tableName[] = $data;
