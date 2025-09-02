@@ -127,8 +127,8 @@ class ConfigController extends AbstractController
                 } else {
                     // 全データ移行
                     $this->saveCustomer($em, $csvDir);
-                    $this->saveProduct($em, $csvDir);
-                    $this->saveOrder($em, $csvDir);
+                    //$this->saveProduct($em, $csvDir);
+                    //$this->saveOrder($em, $csvDir);
                 }
 
                 // plg_customerplusの移行処理を作る
@@ -406,10 +406,10 @@ class ConfigController extends AbstractController
                         }
                     }
                 }
-                
+
                 // PostgreSQL対応: 最終チェックで数値フィールドの空文字をNULLに変換
                 $value = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $value);
-                
+
                 $builder->setValues($value);
 
                 if (($i % $batchSize) === 0) {
@@ -1199,7 +1199,7 @@ class ConfigController extends AbstractController
 
                 // 1行目をkeyとした配列を作る
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
-                
+
                 // PostgreSQL対応: 数値フィールドの空文字をNULLに変換
                 $data = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $data);
 

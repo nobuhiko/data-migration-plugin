@@ -171,19 +171,19 @@ class DataMigrationService
         if ($em->getDatabasePlatform()->getName() !== 'postgresql') {
             return $data;
         }
-        
-        
+
+
         try {
             $columns = $em->getSchemaManager()->listTableColumns($tableName);
             $hasConversion = false;
-            
+
             foreach ($data as $key => &$value) {
                 // 空文字またはfalseの場合にNULL変換を行う
                 if ($value === '' || $value === false) {
                     if (isset($columns[$key])) {
                         $column = $columns[$key];
                         $type = $column->getType()->getName();
-                        
+
                         // 数値型の場合、空文字またはfalseをNULLに変換
                         if (in_array($type, ['integer', 'bigint', 'smallint', 'decimal', 'float', 'numeric'])) {
                             $value = null;
@@ -197,14 +197,12 @@ class DataMigrationService
                     }
                 }
             }
-            
-            
         } catch (\Exception $e) {
             error_log("Error in convertDataTypesForPostgreSQL for table '$tableName': " . $e->getMessage());
             error_log("Data being processed: " . json_encode($data));
             // エラーが発生した場合は元のデータをそのまま返す
         }
-        
+
         return $data;
     }
 
@@ -274,12 +272,24 @@ class DataMigrationService
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } else {
-            // PostgreSQLの場合、外部キー制約を無効化
+            // PostgreSQLの場合: 指定テーブルのみ TRUNCATE ... CASCADE で初期化
+            // 要望により対象は dtb_customer, dtb_member のみ。
             try {
-                $em->exec('SET session_replication_role = replica;'); // need super user
+                $targetTables = ['dtb_customer', 'dtb_member'];
+                // 存在確認 (万一片方無い環境でもエラーにしない)
+                $existing = [];
+                foreach ($targetTables as $t) {
+                    $exists = $em->fetchOne("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=?", [$t]);
+                    if ($exists) {
+                        $existing[] = '"' . str_replace('"', '""', $t) . '"';
+                    }
+                }
+                if ($existing) {
+                    $sql = 'TRUNCATE TABLE ' . implode(', ', $existing) . ' CASCADE;';
+                    $em->exec($sql);
+                }
             } catch (\Exception $e) {
-                // スーパーユーザー権限がない場合はエラーログを出力
-                error_log('Warning: Could not set session_replication_role to replica. Foreign key constraints remain active.');
+                error_log('Warning: TRUNCATE CASCADE (dtb_customer, dtb_member) failed: ' . $e->getMessage());
             }
         }
 
