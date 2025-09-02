@@ -914,44 +914,49 @@ class ConfigController extends AbstractController
         $tableName = $tableName ?: $csvName;
         $isPostgres = $em->getDatabasePlatform()->getName() === 'postgresql';
         if ($isPostgres) {
-            // テーブル別デフォルト適用 (明示指定があれば上書きされる)
-            $defaultOptions = [];
-            switch ($tableName) {
-                case 'mtb_sale_type':
-                    $defaultOptions = [
-                        'discriminator' => 'saletype',
-                        'columnMappings' => ['rank' => 'sort_no'],
-                    ];
-                    break;
-                case 'mtb_device_type':
-                    $defaultOptions = [
-                        'discriminator' => 'devicetype',
-                        'columnMappings' => ['rank' => 'sort_no'],
-                    ];
-                    break;
-                case 'mtb_authority':
-                    $defaultOptions = [
-                        'discriminator' => 'authority',
-                        'columnMappings' => ['rank' => 'sort_no'],
-                    ];
-                    break;
-                default:
-                    // 他の mtb_* も今後必要ならここに追加
-                    break;
-            }
-            // マージ (呼び出し側 options が優先)
-            $merged = $defaultOptions;
-            foreach ($options as $k => $v) {
-                if ($k === 'columnMappings' && isset($merged['columnMappings']) && is_array($v)) {
-                    $merged['columnMappings'] = array_merge($merged['columnMappings'], $v);
-                } else {
-                    $merged[$k] = $v;
-                }
-            }
-            return $this->upsertMasterFromCsv($em, $dir, $csvName, $tableName, $merged);
+            $mergedOptions = $this->buildMasterUpsertOptions($tableName, $options);
+            return $this->upsertMasterFromCsv($em, $dir, $csvName, $tableName, $mergedOptions);
         }
         // MySQL 等: 従来どおり全消し後インサート
         return $this->saveToP($em, $dir, $csvName, $tableName, $allow_zero);
+    }
+
+    /**
+     * 指定 mtb_* テーブル向け UPSERT オプションのデフォルト構築 + マージ
+     * @param string $tableName 実テーブル名
+     * @param array $override 呼び出し側オプション(優先)
+     * @return array マージ済オプション(discriminator, columnMappings 等)
+     */
+    private function buildMasterUpsertOptions(string $tableName, array $override): array
+    {
+        // すべての mtb_* で共通: rank -> sort_no マッピングを基本付与
+        $base = [
+            'columnMappings' => ['rank' => 'sort_no'],
+        ];
+
+        // discriminator 未指定なら自動生成: mtb_ プレフィックス除去しアンダースコア除去
+        // 例) mtb_sale_type -> saletype, mtb_device_type -> devicetype
+        if (!isset($override['discriminator'])) {
+            if (strpos($tableName, 'mtb_') === 0) {
+                $discriminator = substr($tableName, 4); // プレフィックス除去
+            } else {
+                $discriminator = $tableName;
+            }
+            $discriminator = str_replace('_', '', $discriminator);
+            $base['discriminator'] = $discriminator;
+        }
+
+        // オーバーライド: columnMappings はマージ (override 優先)
+        if (isset($override['columnMappings'])) {
+            $base['columnMappings'] = array_merge($base['columnMappings'], (array)$override['columnMappings']);
+        }
+        foreach ($override as $k => $v) {
+            if ($k === 'columnMappings') {
+                continue;
+            }
+            $base[$k] = $v; // 上書き (discriminator 等)
+        }
+        return $base;
     }
 
     /**
