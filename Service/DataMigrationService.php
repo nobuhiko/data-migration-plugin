@@ -284,7 +284,7 @@ class DataMigrationService
                         $targetTables = ['dtb_order', 'dtb_order_detail', 'dtb_delivery', 'dtb_mail_history', 'dtb_payment'];
                         break;
                     case "CustomerAndOrder":
-                        $targetTables = ['dtb_customer', 'dtb_customer_address', 'dtb_order', 'dtb_order_detail', 'dtb_delivery', 'dtb_mail_history', 'dtb_payment'];
+                        $targetTables = ['dtb_customer', 'dtb_customer_address', 'dtb_order', 'dtb_order_detail', 'dtb_mail_history'];
                         break;
                     default:
                         $targetTables = [];

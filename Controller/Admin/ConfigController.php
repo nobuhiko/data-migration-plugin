@@ -127,7 +127,7 @@ class ConfigController extends AbstractController
                 } else {
                     // 全データ移行
                     $this->saveCustomer($em, $csvDir);
-                    //$this->saveProduct($em, $csvDir);
+                    $this->saveProduct($em, $csvDir);
                     $this->saveOrder($em, $csvDir);
                 }
 
