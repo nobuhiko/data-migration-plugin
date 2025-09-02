@@ -929,6 +929,12 @@ class ConfigController extends AbstractController
                         'columnMappings' => ['rank' => 'sort_no'],
                     ];
                     break;
+                case 'mtb_authority':
+                    $defaultOptions = [
+                        'discriminator' => 'authority',
+                        'columnMappings' => ['rank' => 'sort_no'],
+                    ];
+                    break;
                 default:
                     // 他の mtb_* も今後必要ならここに追加
                     break;
@@ -967,8 +973,10 @@ class ConfigController extends AbstractController
 
         if ($platform === 'postgresql') {
             if ($hasAuthority) {
-                // 権限マスタを汎用 UPSERT
-                $this->upsertMaster($em, $dir, 'mtb_authority', null, true);
+                // 権限マスタを汎用 UPSERT (discriminator 付与)
+                $this->upsertMaster($em, $dir, 'mtb_authority', null, true, [
+                    'discriminator' => 'authority'
+                ]);
             }
             if ($hasMember) {
                 // 既存メンバーを一旦非稼働化
