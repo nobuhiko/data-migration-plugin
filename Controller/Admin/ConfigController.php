@@ -176,7 +176,6 @@ class ConfigController extends AbstractController
     }
 
 
-
     private function saveCustomerAndOrder($em, $csvDir)
     {
         $platform = $this->dataMigrationService->begin($em, "CustomerAndOrder");
@@ -990,7 +989,7 @@ class ConfigController extends AbstractController
      */
     private function upsertAuthorityAndMember($em, $dir)
     {
-        $platform = $em->getDatabasePlatform()->getName();
+        $platform = $this->dataMigrationService->begin($em);
         $authorityCsv = $dir . 'mtb_authority.csv';
         $memberCsv    = $dir . 'dtb_member.csv';
 
@@ -1087,6 +1086,8 @@ class ConfigController extends AbstractController
                 $this->memberIdSet = [];
             }
         }
+        $this->addSuccess('管理者データを登録しました。', 'admin');
+        $em->commit();
     }
 
     private function collectMissingCreatorIds(string $csvDir, array $csvNames): void
