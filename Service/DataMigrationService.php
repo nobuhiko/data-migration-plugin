@@ -263,7 +263,7 @@ class DataMigrationService
                     );');
     }
 
-    public function begin($em)
+    public function begin($em, $context = NULL)
     {
         $em->beginTransaction();
         $platform = $em->getDatabasePlatform()->getName();
@@ -272,11 +272,25 @@ class DataMigrationService
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } else {
-            // PostgreSQLの場合: 指定テーブルのみ TRUNCATE ... CASCADE で初期化
-            // 要望により対象は dtb_customer, dtb_member のみ。
             try {
-                $targetTables = ['dtb_customer', 'dtb_member'];
-                // 存在確認 (万一片方無い環境でもエラーにしない)
+                switch ($context) {
+                    case "Customer":
+                        $targetTables = ['dtb_customer', 'dtb_customer_address'];
+                        break;
+                    case "Product":
+                        $targetTables = ['dtb_product', 'dtb_product_class', 'dtb_product_image', 'dtb_product_category', 'dtb_class_category'];
+                        break;
+                    case "Order":
+                        $targetTables = ['dtb_order', 'dtb_order_detail', 'dtb_delivery', 'dtb_mail_history', 'dtb_payment'];
+                        break;
+                    case "CustomerAndOrder":
+                        $targetTables = ['dtb_customer', 'dtb_customer_address', 'dtb_order', 'dtb_order_detail', 'dtb_delivery', 'dtb_mail_history', 'dtb_payment'];
+                        break;
+                    default:
+                        $targetTables = [];
+                        break;
+                }
+
                 $existing = [];
                 foreach ($targetTables as $t) {
                     $exists = $em->fetchOne("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=?", [$t]);
@@ -285,7 +299,9 @@ class DataMigrationService
                     }
                 }
                 if ($existing) {
-                    $sql = 'TRUNCATE TABLE ' . implode(', ', $existing) . ' CASCADE;';
+                    // PostgreSQL TRUNCATE 構文: TRUNCATE TABLE ... [ RESTART IDENTITY | CONTINUE IDENTITY ] [ CASCADE | RESTRICT ]
+                    // 順序は RESTART IDENTITY が先、その後に CASCADE
+                    $sql = 'TRUNCATE TABLE ' . implode(', ', $existing) . ' RESTART IDENTITY CASCADE;';
                     $em->exec($sql);
                 }
             } catch (\Exception $e) {
@@ -861,6 +877,33 @@ class DataMigrationService
 
             while (($row = fgetcsv($handle)) !== false) {
                 $data = $this->convertNULL(array_combine($key, $row));
+
+                // --- 前処理: リレーション整合性クレンジング ---
+                switch ($tableName) {
+                    case 'dtb_class_category':
+                        // class_name_id=0 (旧データの未設定値) はスキップ
+                        if (isset($data['class_name_id']) && (int)$data['class_name_id'] === 0) {
+                            continue 2; // 次の行へ
+                        }
+                        break;
+                    case 'dtb_product_class':
+                        // 存在しないカテゴリIDは NULL に変更 (外部キー違反防止)
+                        foreach (['class_category_id1', 'class_category_id2'] as $catCol) {
+                            if (isset($data[$catCol]) && $data[$catCol] !== null && $data[$catCol] !== '') {
+                                $catId = (int)$data[$catCol];
+                                if ($catId === 0) {
+                                    $data[$catCol] = null;
+                                } else {
+                                    $exists = $em->fetchOne('SELECT 1 FROM dtb_class_category WHERE id = ?', [$catId]);
+                                    if (!$exists) {
+                                        $data[$catCol] = null;
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                }
+                // --- 前処理ここまで ---
 
                 if ($save_flag) {
                     $this->$tableName[] = $data;
