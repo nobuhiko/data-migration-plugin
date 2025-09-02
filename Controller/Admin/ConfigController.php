@@ -48,6 +48,8 @@ class ConfigController extends AbstractController
     protected $shipping_order = [];
     /** @var array */
     protected $customer_point = [];
+    protected $memberIdSet = null; // array<int,bool>
+    protected $missingCreatorIds = []; // array<int,bool>
 
     /**
      * constructor.
@@ -125,6 +127,19 @@ class ConfigController extends AbstractController
                     // 会員・受注のみ移行
                     $this->saveCustomerAndOrder($em, $csvDir);
                 } else {
+                    // 権限/メンバーは最終的に UPSERT (PostgreSQL) / 再投入 (MySQL)。
+                    // dtb_member は一旦全件を非稼働(work_id=0)にした上で CSV の内容を反映。
+                    $this->upsertAuthorityAndMember($em, $csvDir);
+                    $this->collectMissingCreatorIds($csvDir, [
+                        'dtb_delivery',
+                        'dtb_delivery_time',
+                        'dtb_delivery_fee',
+                        'dtb_payment',
+                        'dtb_order',
+                        'dtb_shipping',
+                        'dtb_mail_history'
+                    ]);
+
                     // 全データ移行
                     $this->saveCustomer($em, $csvDir);
                     $this->saveProduct($em, $csvDir);
@@ -140,7 +155,6 @@ class ConfigController extends AbstractController
             // 削除
             $fs = new Filesystem();
             $fs->remove($tmpDir);
-
             // .envのECCUBE_AUTH_MAGICを書き換える
             $this->dataMigrationService->updateEnv($form['auth_magic']->getData());
 
@@ -166,6 +180,18 @@ class ConfigController extends AbstractController
     private function saveCustomerAndOrder($em, $csvDir)
     {
         $platform = $this->dataMigrationService->begin($em, "CustomerAndOrder");
+
+        // 先に権限/メンバーを反映し creator_id の参照整合性を確保
+        //$this->upsertAuthorityAndMember($em, $csvDir);
+        $this->collectMissingCreatorIds($csvDir, [
+            'dtb_delivery',
+            'dtb_delivery_time',
+            'dtb_delivery_fee',
+            'dtb_payment',
+            'dtb_order',
+            'dtb_shipping',
+            'dtb_mail_history'
+        ]);
 
         // 会員
         $this->saveToC($em, $csvDir, 'dtb_customer');
@@ -245,9 +271,7 @@ class ConfigController extends AbstractController
                 $this->saveToC($em, $csvDir, 'dtb_other_deliv', 'dtb_customer_address', false, 1);
             }
 
-            // 権限/メンバーは最終的に UPSERT (PostgreSQL) / 再投入 (MySQL)。
-            // dtb_member は一旦全件を非稼働(work_id=0)にした上で CSV の内容を反映。
-            $this->upsertAuthorityAndMember($em, $csvDir);
+
 
             if ($platform == 'mysql') {
                 $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
@@ -1008,10 +1032,7 @@ class ConfigController extends AbstractController
                     $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
                     $insertValues = [];
                     foreach ($listTableColumns as $col) {
-                        if ($col === 'work_id') {
-                            $insertValues[$col] = 0; // 常に非稼働
-                            continue;
-                        }
+
                         if ($col === 'discriminator_type') {
                             $insertValues[$col] = $data[$col] ?? 'member';
                             continue;
@@ -1038,6 +1059,16 @@ class ConfigController extends AbstractController
                 }
                 fclose($handle);
             }
+            // メンバーIDキャッシュ
+            try {
+                $ids = $em->fetchFirstColumn('SELECT id FROM dtb_member');
+                $this->memberIdSet = [];
+                foreach ($ids as $id) {
+                    $this->memberIdSet[(int)$id] = true;
+                }
+            } catch (\Exception $e) {
+                $this->memberIdSet = [];
+            }
         } else { // MySQL 他
             if ($hasAuthority) {
                 $this->saveToC($em, $dir, 'mtb_authority', null, true);
@@ -1046,6 +1077,62 @@ class ConfigController extends AbstractController
                 $this->saveToC($em, $dir, 'dtb_member', null, true);
                 $em->exec('UPDATE dtb_member SET work_id = 0');
             }
+            try {
+                $ids = $em->fetchFirstColumn('SELECT id FROM dtb_member');
+                $this->memberIdSet = [];
+                foreach ($ids as $id) {
+                    $this->memberIdSet[(int)$id] = true;
+                }
+            } catch (\Exception $e) {
+                $this->memberIdSet = [];
+            }
+        }
+    }
+
+    private function collectMissingCreatorIds(string $csvDir, array $csvNames): void
+    {
+        if ($this->memberIdSet === null) {
+            return;
+        }
+        $newMissing = [];
+        foreach ($csvNames as $name) {
+            $path = $csvDir . $name . '.csv';
+            if (!file_exists($path) || filesize($path) === 0) {
+                continue;
+            }
+            if (($h = fopen($path, 'r')) === false) {
+                continue;
+            }
+            $header = fgetcsv($h);
+            if (!$header) {
+                fclose($h);
+                continue;
+            }
+            $header = array_map('trim', $header);
+            $idx = array_search('creator_id', $header, true);
+            if ($idx === false) {
+                fclose($h);
+                continue;
+            }
+            while (($row = fgetcsv($h)) !== false) {
+                if (!isset($row[$idx]) || $row[$idx] === '' || strtoupper($row[$idx]) === 'NULL') {
+                    continue;
+                }
+                $cid = (int)$row[$idx];
+                if ($cid > 0 && !isset($this->memberIdSet[$cid])) {
+                    $newMissing[$cid] = true;
+                }
+            }
+            fclose($h);
+        }
+        if ($newMissing) {
+            foreach ($newMissing as $k => $_) {
+                $this->missingCreatorIds[$k] = true;
+            }
+            $all = array_keys($this->missingCreatorIds);
+            sort($all);
+            $preview = array_slice($all, 0, 10);
+            $this->addWarning('存在しない creator_id 検出: ' . count($all) . ' 件 (例: ' . implode(',', $preview) . (count($all) > 10 ? '...' : '') . ') は 1 にフォールバックします。', 'admin');
         }
     }
 
@@ -1405,6 +1492,7 @@ class ConfigController extends AbstractController
         $tableName = ($tableName) ? $tableName : $csvName;
         // 通常: リセット (UPSERT 対象は saveOrder で upsertMaster 呼び出し済のためここに来ない想定)
         $this->dataMigrationService->resetTable($em, $tableName);
+        $creatorFallbackApplied = 0;
 
         if (file_exists($tmpDir . $csvName . '.csv') == false) {
             // 無視する
@@ -1470,7 +1558,15 @@ class ConfigController extends AbstractController
                         if ($column == 'use_point') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 0;
                         } elseif ($column == 'creator_id') {
-                            $value[$column] = !empty($data[$column]) ? $data[$column] : 1;
+                            $cid = isset($data[$column]) && $data[$column] !== '' ? (int)$data[$column] : 0;
+                            if ($cid > 0 && $this->memberIdSet !== null && isset($this->memberIdSet[$cid]) && !isset($this->missingCreatorIds[$cid])) {
+                                $value[$column] = $cid;
+                            } else {
+                                if ($cid > 0 && $this->memberIdSet !== null && !isset($this->memberIdSet[$cid])) {
+                                    $creatorFallbackApplied++;
+                                }
+                                $value[$column] = 1;
+                            }
                         } elseif ($column == 'tax_adjust') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 0;
                         } elseif ($column == 'tax') {
@@ -1599,7 +1695,15 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'payment_date') {
                             $value[$column] = (!empty($data[$column]) && $data[$column] != '0000-00-00 00:00:00') ? self::convertTz($data[$column]) : null;
                         } elseif ($column == 'creator_id') {
-                            $value[$column] = !empty($data[$column]) ? $data[$column] : 1;
+                            $cid = isset($data[$column]) && $data[$column] !== '' ? (int)$data[$column] : 0;
+                            if ($cid > 0 && $this->memberIdSet !== null && isset($this->memberIdSet[$cid]) && !isset($this->missingCreatorIds[$cid])) {
+                                $value[$column] = $cid;
+                            } else {
+                                if ($cid > 0 && $this->memberIdSet !== null && !isset($this->memberIdSet[$cid])) {
+                                    $creatorFallbackApplied++;
+                                }
+                                $value[$column] = 1;
+                            }
                         } elseif ($column == 'charge' || $column == 'use_point' || $column == 'add_point' || $column == 'discount' || $column == 'total' || $column == 'subtotal' || $column == 'tax' || $column == 'payment_total') {
                             $value[$column] = !empty($data[$column]) ? (int) $data[$column] : 0;
                         } elseif ($column == 'tax_adjust') {
