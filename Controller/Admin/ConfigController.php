@@ -814,7 +814,7 @@ class ConfigController extends AbstractController
 
                         if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
                             // 3系には del_flg がある
-                            if ($data['del_flg'] == 1) {
+                            if (isset($data['del_flg']) && $data['del_flg'] == 1) {
                                 unset($value);
                                 continue 2;
                             }
@@ -1458,14 +1458,10 @@ class ConfigController extends AbstractController
                 $em->exec('DELETE FROM dtb_payment_option');
             }
 
-
-            // mtb_device_type を UPSERT した場合のシーケンス同期
-            if (file_exists($csvDir . 'mtb_device_type.csv')) {
-                $this->dataMigrationService->setIdSeq($em, 'mtb_device_type');
-            }
             if ($platform == 'mysql') {
                 $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
             } else {
+                $this->dataMigrationService->setIdSeq($em, 'mtb_device_type');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_order');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_order_item');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_shipping');
@@ -1776,13 +1772,19 @@ class ConfigController extends AbstractController
                                 $value['delivery_id'] = null;
                             }
                             if (isset($data['time_id']) && strlen($data['time_id']) > 0) {
-                                $value['time_id'] = $this->delivery_time[$data['delivery_id']][$data['time_id']];
+                                if (!empty($this->delivery_time)
+                                    && isset($this->delivery_time[$data['delivery_id']])
+                                    && isset($this->delivery_time[$data['delivery_id']][$data['time_id']])) {
+                                    $value['time_id'] = $this->delivery_time[$data['delivery_id']][$data['time_id']];
+                                }
                             }
                         } else {
                             $value['delivery_id'] = !empty($this->delivery_id[$value['order_id']]) ? $this->delivery_id[$value['order_id']] : null;
                             $value['delivery_time'] = empty($data['time']) ? null : $data['time'];
                             if (isset($data['time_id']) && strlen($data['time_id']) > 0) {
-                                if (!empty($this->delivery_time)) {
+                                if (!empty($this->delivery_time)
+                                    && isset($this->delivery_time[$value['delivery_id']])
+                                    && isset($this->delivery_time[$value['delivery_id']][$data['time_id']])) {
                                     $value['time_id'] = $this->delivery_time[$value['delivery_id']][$data['time_id']];
                                 }
                             }
