@@ -113,13 +113,27 @@ class ConfigController extends AbstractController
             }
 
             if ($this->dataMigrationService->isVersion('4.0/4.1')) {
+                // 権限/メンバーを先に処理（外部キー制約のため）
+                $this->upsertAuthorityAndMember($em, $csvDir);
+                $this->collectMissingCreatorIds($csvDir, [
+                    'dtb_delivery',
+                    'dtb_delivery_time',
+                    'dtb_delivery_fee',
+                    'dtb_payment',
+                    'dtb_order',
+                    'dtb_shipping',
+                    'dtb_mail_history'
+                ]);
 
                 // $csvDir 内のファイルをすべて読み込む
                 $files = scandir($csvDir);
                 foreach ($files as $file) {
                     // csvファイルのみ処理
                     if (is_file($csvDir . $file) && pathinfo($file, PATHINFO_EXTENSION) === 'csv') {
-                        $this->fix4x($em, $csvDir, $file);
+                        // dtb_member, dtb_plugin はスキップ（別途処理済み or 処理不要）
+                        if ($file !== 'dtb_member.csv' && $file !== 'dtb_plugin.csv') {
+                            $this->fix4x($em, $csvDir, $file);
+                        }
                     }
                 }
             } else {
@@ -2120,11 +2134,6 @@ class ConfigController extends AbstractController
 
     private function fix4x($em, $tmpDir, $csvName)
     {
-        if ($csvName == "dtb_member.csv") {
-            // 変更するとログアウトしちゃうので
-            return;
-        }
-
         // csvNameからテーブル名を取得
 
         if (filesize($tmpDir . $csvName) == 0) {
