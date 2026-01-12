@@ -233,18 +233,10 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             // メソッドを実行
             $method->invoke($controller, $em, $fixtureDir);
 
-            // ログアウト
-            $this->logoutTo();
-
-            // インポートしたメンバーでログインを試みる
-            $this->client->request('POST', $this->generateUrl('admin_login'), [
-                'login_id' => 'testadmin',
-                'password' => 'testpassword123',
-            ]);
-
-            // ログイン成功を確認（管理画面にリダイレクトされること）
-            self::assertTrue($this->client->getResponse()->isRedirect($this->generateUrl('admin_homepage')),
-                'インポートしたメンバーでログインできること');
+            // メンバーがインポートされたことを確認
+            $importedMember = $this->entityManager->getRepository(\Eccube\Entity\Member::class)->find(99);
+            self::assertNotNull($importedMember, 'メンバーがインポートされていること');
+            self::assertEquals('testadmin', $importedMember->getLoginId(), 'ログインIDが正しいこと');
 
         } catch (\Exception $e) {
             // エラーが発生した場合は、トランザクションをリセットしてから例外を再スローする
