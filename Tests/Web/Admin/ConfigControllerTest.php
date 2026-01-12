@@ -106,3 +106,4 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             throw $e;
         }
     }
+}
