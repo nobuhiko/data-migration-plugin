@@ -220,24 +220,15 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             // 権限マスタも削除
             $em->executeStatement('DELETE FROM mtb_authority WHERE id = 0');
 
-            // 正しいパスワードハッシュでメンバーデータを更新
-            $encoder = $container->get('security.user_password_encoder.generic');
-            $memberRepository = $this->entityManager->getRepository(\Eccube\Entity\Member::class);
+            // 実際にログイン可能なパスワードハッシュを生成
+            $testPassword = 'testpassword123';
+            $hashedPassword = password_hash($testPassword, PASSWORD_BCRYPT);
 
-            // 既存の管理者を取得してパスワードハッシュを参考にする
-            $existingMember = $memberRepository->find(1);
-            if ($existingMember) {
-                // 実際にログイン可能なパスワードハッシュを生成
-                $testPassword = 'testpassword123';
+            // フィクスチャファイルを一時的に更新
+            $csvContent = "id,name,department,login_id,password,sort_no,authority_id,work_id,creator_id,create_date,update_date,discriminator_type\n";
+            $csvContent .= "99,テスト管理者,開発部,testadmin,$hashedPassword,1,0,1,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member\n";
 
-                // フィクスチャファイルを一時的に更新（本番では別の方法が望ましい）
-                $hashedPassword = password_hash($testPassword, PASSWORD_BCRYPT);
-
-                $csvContent = "id,name,department,login_id,password,sort_no,authority_id,work_id,creator_id,create_date,update_date,discriminator_type\n";
-                $csvContent .= "99,テスト管理者,開発部,testadmin,$hashedPassword,1,0,1,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member\n";
-
-                file_put_contents($fixtureDir . 'dtb_member.csv', $csvContent);
-            }
+            file_put_contents($fixtureDir . 'dtb_member.csv', $csvContent);
 
             // メソッドを実行
             $method->invoke($controller, $em, $fixtureDir);
