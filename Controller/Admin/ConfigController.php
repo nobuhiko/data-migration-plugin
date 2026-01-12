@@ -2179,7 +2179,15 @@ class ConfigController extends AbstractController
                 foreach ($columns as $column) {
 
                     $columnName = $column->getName();
-                    if ($column->getNotNull()) {
+
+                    // 特定カラムの処理
+                    if ($columnName == 'two_factor_auth_enabled' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
+                        // 4.0系には存在しないカラム。デフォルト値として0（無効）を設定
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : 0;
+                    } elseif ($columnName == 'two_factor_auth_key' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
+                        // 4.0系には存在しないカラム。NULLを設定
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
+                    } elseif ($column->getNotNull()) {
                         $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : 0;
                     } else {
                         $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
