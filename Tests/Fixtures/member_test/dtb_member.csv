@@ -1,3 +1,3 @@
-member_id,name,department,login_id,password,sort_no,authority_id,work_id,creator_id,create_date,update_date,discriminator_type
-99,テスト管理者,開発部,testadmin,$2y$10$dummyhash000000000000000000000000000000000000000000,1,0,1,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member
-100,テスト店舗オーナー,営業部,testowner,$2y$10$dummyhash000000000000000000000000000000000000000000,2,1,1,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member
+member_id,name,department,login_id,password,sort_no,authority,work,del_flg,creator_id,create_date,update_date,discriminator_type
+99,テスト管理者,開発部,testadmin,$2y$10$dummyhash000000000000000000000000000000000000000000,1,0,1,0,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member
+100,テスト店舗オーナー,営業部,testowner,$2y$10$dummyhash000000000000000000000000000000000000000000,2,1,1,0,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member
