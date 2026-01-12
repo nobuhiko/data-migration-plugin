@@ -142,6 +142,9 @@ class DataMigrationService
 
         if ($platform == 'mysql') {
             $em->exec('DELETE FROM ' . $tableName);
+        } elseif ($platform == 'postgresql') {
+            // PostgreSQLでは外部キー制約がDEFERRABLEでないため、TRUNCATE CASCADEを使用
+            $em->exec('TRUNCATE TABLE "' . $tableName . '" CASCADE');
         } else {
             $em->exec('DELETE FROM ' . $tableName);
         }
