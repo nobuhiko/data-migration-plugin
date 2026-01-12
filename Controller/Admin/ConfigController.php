@@ -399,6 +399,9 @@ class ConfigController extends AbstractController
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         } elseif ($column == 'creator_id') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 1;
+                        } elseif ($column == 'two_factor_auth_enabled' && $tableName == 'dtb_member') {
+                            // 4.0系には存在しないカラム。デフォルト値として0（無効）を設定
+                            $value[$column] = isset($data[$column]) ? $data[$column] : 0;
                         } elseif ($column == 'plg_mailmagazine_flg') {
                             $value[$column] = (!empty($data['mailmaga_flg']) && $data['mailmaga_flg'] != 3) ? 1 : 0;
                         } elseif ($column == 'id' && $tableName == 'dtb_member') {
