@@ -121,6 +121,8 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         try {
             // テスト実行前に既存のメンバーを削除（idが99, 100の場合）
             $em->executeStatement('DELETE FROM dtb_member WHERE id IN (99, 100)');
+            // authority_id 0,1を参照しているメンバーを削除（外部キー制約のため）
+            $em->executeStatement('DELETE FROM dtb_member WHERE authority_id IN (0, 1)');
             $em->executeStatement('DELETE FROM mtb_authority WHERE id IN (0, 1)');
 
             // メソッドを実行
@@ -179,6 +181,10 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         try {
             // テスト実行前に既存のメンバーを削除（idが99, 100の場合）
             $em->executeStatement('DELETE FROM dtb_member WHERE id IN (99, 100)');
+            // authority_id 0を参照しているメンバーも削除（外部キー制約のため）
+            $em->executeStatement('DELETE FROM dtb_member WHERE authority_id = 0');
+            // 権限マスタも削除
+            $em->executeStatement('DELETE FROM mtb_authority WHERE id = 0');
 
             // 正しいパスワードハッシュでメンバーデータを更新
             $encoder = $container->get('security.user_password_encoder.generic');
@@ -193,8 +199,8 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
                 // フィクスチャファイルを一時的に更新（本番では別の方法が望ましい）
                 $hashedPassword = password_hash($testPassword, PASSWORD_BCRYPT);
 
-                $csvContent = "id,name,department,login_id,password,authority_id,work_id,creator_id,create_date,update_date,discriminator_type\n";
-                $csvContent .= "99,テスト管理者,開発部,testadmin,$hashedPassword,0,1,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member\n";
+                $csvContent = "id,name,department,login_id,password,sort_no,authority_id,work_id,creator_id,create_date,update_date,discriminator_type\n";
+                $csvContent .= "99,テスト管理者,開発部,testadmin,$hashedPassword,1,0,1,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member\n";
 
                 file_put_contents($fixtureDir . 'dtb_member.csv', $csvContent);
             }
