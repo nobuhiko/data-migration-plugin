@@ -225,7 +225,7 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             $hashedPassword = password_hash($testPassword, PASSWORD_BCRYPT);
 
             // フィクスチャファイルを一時的に更新
-            $csvContent = "id,name,department,login_id,password,sort_no,authority_id,work_id,creator_id,create_date,update_date,discriminator_type\n";
+            $csvContent = "member_id,name,department,login_id,password,sort_no,authority_id,work_id,creator_id,create_date,update_date,discriminator_type\n";
             $csvContent .= "99,テスト管理者,開発部,testadmin,$hashedPassword,1,0,1,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member\n";
 
             file_put_contents($fixtureDir . 'dtb_member.csv', $csvContent);
