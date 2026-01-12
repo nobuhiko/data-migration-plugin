@@ -121,8 +121,25 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         try {
             // テスト実行前に既存のメンバーを削除（idが99, 100の場合）
             $em->executeStatement('DELETE FROM dtb_member WHERE id IN (99, 100)');
-            // authority_id 0,1を参照しているメンバーを削除（外部キー制約のため）
-            $em->executeStatement('DELETE FROM dtb_member WHERE authority_id IN (0, 1)');
+
+            // authority_id 0,1を参照しているメンバーIDを取得
+            $memberIds = $em->fetchFirstColumn('SELECT id FROM dtb_member WHERE authority_id IN (0, 1)');
+
+            if (!empty($memberIds)) {
+                // それらのメンバーを参照しているcreator_idをNULLに更新（外部キー制約のため）
+                $em->executeStatement(
+                    'UPDATE dtb_member SET creator_id = NULL WHERE creator_id IN (?)',
+                    [$memberIds],
+                    [\Doctrine\DBAL\Connection::PARAM_INT_ARRAY]
+                );
+                // authority_id 0,1を参照しているメンバーを削除
+                $em->executeStatement(
+                    'DELETE FROM dtb_member WHERE id IN (?)',
+                    [$memberIds],
+                    [\Doctrine\DBAL\Connection::PARAM_INT_ARRAY]
+                );
+            }
+
             $em->executeStatement('DELETE FROM mtb_authority WHERE id IN (0, 1)');
 
             // メソッドを実行
@@ -181,8 +198,25 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         try {
             // テスト実行前に既存のメンバーを削除（idが99, 100の場合）
             $em->executeStatement('DELETE FROM dtb_member WHERE id IN (99, 100)');
-            // authority_id 0を参照しているメンバーも削除（外部キー制約のため）
-            $em->executeStatement('DELETE FROM dtb_member WHERE authority_id = 0');
+
+            // authority_id 0を参照しているメンバーIDを取得
+            $memberIds = $em->fetchFirstColumn('SELECT id FROM dtb_member WHERE authority_id = 0');
+
+            if (!empty($memberIds)) {
+                // それらのメンバーを参照しているcreator_idをNULLに更新（外部キー制約のため）
+                $em->executeStatement(
+                    'UPDATE dtb_member SET creator_id = NULL WHERE creator_id IN (?)',
+                    [$memberIds],
+                    [\Doctrine\DBAL\Connection::PARAM_INT_ARRAY]
+                );
+                // authority_id 0を参照しているメンバーを削除
+                $em->executeStatement(
+                    'DELETE FROM dtb_member WHERE id IN (?)',
+                    [$memberIds],
+                    [\Doctrine\DBAL\Connection::PARAM_INT_ARRAY]
+                );
+            }
+
             // 権限マスタも削除
             $em->executeStatement('DELETE FROM mtb_authority WHERE id = 0');
 
