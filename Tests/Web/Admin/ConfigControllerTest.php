@@ -28,20 +28,21 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
     public function versionProvider()
     {
         return [
-            //['2_11_5', 1, 0, 3],
-            //['2_12_6', 1, 3, 2],
-            ['2_13_5', 1, 3, 2],
-            //['3_0_9', 1, 2, 6],   // PostgreSQL対応により3.x系も復活
-            //['3_0_18', 1, 2, 4],  // PostgreSQL対応により3.x系も復活
-            //['4_0_6', 1, 12, 20],
-            //['4_1_2', 1, 12, 20],
+            //['2_11_5', 1, 0, 3, 0],
+            //['2_12_6', 1, 3, 2, 0],
+            ['2_13_5', 1, 3, 2, 0],
+            //['3_0_9', 1, 2, 6, 0],   // PostgreSQL対応により3.x系も復活
+            //['3_0_18', 1, 2, 4, 0],  // PostgreSQL対応により3.x系も復活
+            //['4_0_6', 1, 12, 20, 0],
+            //['4_1_2', 1, 12, 20, 0],
+            ['member_test', 0, 0, 0, 2], // Member import test
         ];
     }
 
     /**
      * @dataProvider versionProvider
      */
-    public function testバックアップファイルをアップロードできるかテスト($v, $c, $p, $o)
+    public function testバックアップファイルをアップロードできるかテスト($v, $c, $p, $o, $m = 0)
     {
         $container = self::getContainer();
         $project_dir = $container->getParameter('kernel.project_dir');
@@ -87,6 +88,11 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             $orders = $this->entityManager->getRepository(Order::class)->findAll();
             self::assertEquals($o, count($orders));
 
+            if ($m > 0) {
+                $members = $this->entityManager->getRepository(\Eccube\Entity\Member::class)->findAll();
+                self::assertEquals($m, count($members), 'メンバーが正しくインポートされること');
+            }
+
             // ECCUBE_AUTH_MAGICの値を取得してアサート
             //$eccubeConfig = $container->get('Eccube\Common\EccubeConfig');
             //$authMagic = $eccubeConfig->get('eccube_auth_magic');
@@ -100,151 +106,3 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             throw $e;
         }
     }
-
-    public function testUpsertAuthorityAndMember()
-    {
-        $container = self::getContainer();
-        $project_dir = $container->getParameter('kernel.project_dir');
-        $fixtureDir = $project_dir . '/app/Plugin/DataMigration43/Tests/Fixtures/member_test/';
-
-        // Controllerのインスタンスを取得
-        $controller = $container->get('Plugin\DataMigration43\Controller\Admin\ConfigController');
-
-        // ReflectionClassを使ってprotectedメソッドにアクセス
-        $reflection = new \ReflectionClass($controller);
-        $method = $reflection->getMethod('upsertAuthorityAndMember');
-        $method->setAccessible(true);
-
-        // EntityManagerの接続を取得
-        $em = $this->entityManager->getConnection();
-
-        try {
-            // テスト実行前に既存のメンバーを削除（idが99, 100の場合）
-            $em->executeStatement('DELETE FROM dtb_member WHERE id IN (99, 100)');
-
-            // authority_id 0,1を参照しているメンバーIDを取得
-            $memberIds = $em->fetchFirstColumn('SELECT id FROM dtb_member WHERE authority_id IN (0, 1)');
-
-            if (!empty($memberIds)) {
-                // それらのメンバーを参照しているcreator_idをNULLに更新（外部キー制約のため）
-                $em->executeStatement(
-                    'UPDATE dtb_member SET creator_id = NULL WHERE creator_id IN (?)',
-                    [$memberIds],
-                    [\Doctrine\DBAL\Connection::PARAM_INT_ARRAY]
-                );
-                // authority_id 0,1を参照しているメンバーを削除
-                $em->executeStatement(
-                    'DELETE FROM dtb_member WHERE id IN (?)',
-                    [$memberIds],
-                    [\Doctrine\DBAL\Connection::PARAM_INT_ARRAY]
-                );
-            }
-
-            $em->executeStatement('DELETE FROM mtb_authority WHERE id IN (0, 1)');
-
-            // メソッドを実行
-            $method->invoke($controller, $em, $fixtureDir);
-
-            // 権限マスタが正しくインポートされたか確認
-            $authorities = $em->fetchAllAssociative('SELECT * FROM mtb_authority ORDER BY id');
-            self::assertCount(2, $authorities, '権限マスタが2件インポートされること');
-            self::assertEquals(0, $authorities[0]['id']);
-            self::assertEquals('システム管理者', $authorities[0]['name']);
-            self::assertEquals(1, $authorities[1]['id']);
-            self::assertEquals('店舗オーナー', $authorities[1]['name']);
-
-            // メンバーが正しくインポートされたか確認
-            $members = $em->fetchAllAssociative('SELECT * FROM dtb_member WHERE id IN (99, 100) ORDER BY id');
-            self::assertCount(2, $members, 'メンバーが2件インポートされること');
-            self::assertEquals(99, $members[0]['id']);
-            self::assertEquals('テスト管理者', $members[0]['name']);
-            self::assertEquals('testadmin', $members[0]['login_id']);
-            self::assertEquals(0, $members[0]['authority_id']);
-            self::assertEquals(1, $members[0]['work_id'], 'work_idが1（稼働中）であること');
-
-            self::assertEquals(100, $members[1]['id']);
-            self::assertEquals('テスト店舗オーナー', $members[1]['name']);
-            self::assertEquals('testowner', $members[1]['login_id']);
-            self::assertEquals(1, $members[1]['authority_id']);
-            self::assertEquals(1, $members[1]['work_id'], 'work_idが1（稼働中）であること');
-
-        } catch (\Exception $e) {
-            // エラーが発生した場合は、トランザクションをリセットしてから例外を再スローする
-            if ($this->entityManager->getConnection()->isTransactionActive()) {
-                $this->entityManager->getConnection()->rollBack();
-                $this->entityManager->getConnection()->beginTransaction();
-            }
-            throw $e;
-        }
-    }
-
-    public function testUpsertAuthorityAndMemberでログイン可能()
-    {
-        $container = self::getContainer();
-        $project_dir = $container->getParameter('kernel.project_dir');
-        $fixtureDir = $project_dir . '/app/Plugin/DataMigration43/Tests/Fixtures/member_test/';
-
-        // Controllerのインスタンスを取得
-        $controller = $container->get('Plugin\DataMigration43\Controller\Admin\ConfigController');
-
-        // ReflectionClassを使ってprotectedメソッドにアクセス
-        $reflection = new \ReflectionClass($controller);
-        $method = $reflection->getMethod('upsertAuthorityAndMember');
-        $method->setAccessible(true);
-
-        // EntityManagerの接続を取得
-        $em = $this->entityManager->getConnection();
-
-        try {
-            // テスト実行前に既存のメンバーを削除（idが99, 100の場合）
-            $em->executeStatement('DELETE FROM dtb_member WHERE id IN (99, 100)');
-
-            // authority_id 0を参照しているメンバーIDを取得
-            $memberIds = $em->fetchFirstColumn('SELECT id FROM dtb_member WHERE authority_id = 0');
-
-            if (!empty($memberIds)) {
-                // それらのメンバーを参照しているcreator_idをNULLに更新（外部キー制約のため）
-                $em->executeStatement(
-                    'UPDATE dtb_member SET creator_id = NULL WHERE creator_id IN (?)',
-                    [$memberIds],
-                    [\Doctrine\DBAL\Connection::PARAM_INT_ARRAY]
-                );
-                // authority_id 0を参照しているメンバーを削除
-                $em->executeStatement(
-                    'DELETE FROM dtb_member WHERE id IN (?)',
-                    [$memberIds],
-                    [\Doctrine\DBAL\Connection::PARAM_INT_ARRAY]
-                );
-            }
-
-            // 権限マスタも削除
-            $em->executeStatement('DELETE FROM mtb_authority WHERE id = 0');
-
-            // 実際にログイン可能なパスワードハッシュを生成
-            $testPassword = 'testpassword123';
-            $hashedPassword = password_hash($testPassword, PASSWORD_BCRYPT);
-
-            // フィクスチャファイルを一時的に更新
-            $csvContent = "member_id,name,department,login_id,password,rank,sort_no,authority,work,del_flg,creator_id,create_date,update_date,discriminator_type\n";
-            $csvContent .= "99,テスト管理者,開発部,testadmin,$hashedPassword,1,1,0,1,0,1,2024-01-01 00:00:00,2024-01-01 00:00:00,member\n";
-
-            file_put_contents($fixtureDir . 'dtb_member.csv', $csvContent);
-
-            // メソッドを実行
-            $method->invoke($controller, $em, $fixtureDir);
-
-            // メンバーがインポートされたことを確認
-            $importedMember = $this->entityManager->getRepository(\Eccube\Entity\Member::class)->find(99);
-            self::assertNotNull($importedMember, 'メンバーがインポートされていること');
-            self::assertEquals('testadmin', $importedMember->getLoginId(), 'ログインIDが正しいこと');
-
-        } catch (\Exception $e) {
-            // エラーが発生した場合は、トランザクションをリセットしてから例外を再スローする
-            if ($this->entityManager->getConnection()->isTransactionActive()) {
-                $this->entityManager->getConnection()->rollBack();
-                $this->entityManager->getConnection()->beginTransaction();
-            }
-            throw $e;
-        }
-    }
-}
