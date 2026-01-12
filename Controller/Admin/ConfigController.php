@@ -1089,11 +1089,11 @@ class ConfigController extends AbstractController
                         }
                     }
                     // 4.0系には存在しないカラムのデフォルト値を設定
-                    if (isset($insertValues['two_factor_auth_enabled']) && $insertValues['two_factor_auth_enabled'] === null) {
+                    if (array_key_exists('two_factor_auth_enabled', $insertValues) && $insertValues['two_factor_auth_enabled'] === null) {
                         $insertValues['two_factor_auth_enabled'] = 0;
                     }
-                    if (isset($insertValues['two_factor_auth_key']) && $insertValues['two_factor_auth_key'] === null) {
-                        $insertValues['two_factor_auth_key'] = null; // NULL許可
+                    if (array_key_exists('two_factor_auth_key', $insertValues) && $insertValues['two_factor_auth_key'] === null) {
+                        $insertValues['two_factor_auth_key'] = null; // NULL許可（この行は冗長だが明示的に残す）
                     }
                     $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
                     $placeholders = implode(',', array_fill(0, count($insertValues), '?'));
