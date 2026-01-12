@@ -2187,6 +2187,19 @@ class ConfigController extends AbstractController
                     } elseif ($columnName == 'two_factor_auth_key' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
                         // 4.0系には存在しないカラム。NULLを設定
                         $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
+                    } elseif ($columnName == 'work' && $tableName == 'dtb_member') {
+                        // 4.0系ではwork_idというカラム名
+                        $value[$columnName] = isset($data['work_id']) && $data['work_id'] !== '' ? $data['work_id'] : null;
+                    } elseif ($columnName == 'authority' && $tableName == 'dtb_member') {
+                        // 4.0系ではauthority_idというカラム名
+                        $value[$columnName] = isset($data['authority_id']) && $data['authority_id'] !== '' ? $data['authority_id'] : null;
+                    } elseif ($columnName == 'sex_id' || $columnName == 'job_id' || $columnName == 'country_id' || $columnName == 'pref_id') {
+                        // 外部キー制約があるカラムは、空の場合nullを設定（0を設定すると外部キー違反になる）
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
+                    } elseif ($columnName == 'discriminator_type') {
+                        // discriminator_typeは、テーブル名から生成
+                        $search = ['dtb_', 'mtb_', '_'];
+                        $value[$columnName] = str_replace($search, '', $tableName);
                     } elseif ($column->getNotNull()) {
                         $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : 0;
                     } else {
