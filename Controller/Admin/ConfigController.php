@@ -1053,6 +1053,15 @@ class ConfigController extends AbstractController
                             $insertValues[$col] = $data[$col] ?? 'member';
                             continue;
                         }
+                        // 4.0系のカラム名マッピング
+                        if ($col === 'work' && !array_key_exists($col, $data) && array_key_exists('work_id', $data)) {
+                            $insertValues[$col] = $data['work_id'];
+                            continue;
+                        }
+                        if ($col === 'authority' && !array_key_exists($col, $data) && array_key_exists('authority_id', $data)) {
+                            $insertValues[$col] = $data['authority_id'];
+                            continue;
+                        }
                         if (array_key_exists($col, $data)) {
                             $insertValues[$col] = $data[$col];
                         } else {
@@ -1065,6 +1074,12 @@ class ConfigController extends AbstractController
                     foreach (['create_date', 'update_date'] as $dcol) {
                         if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || strpos($insertValues[$dcol], '0000') === 0)) {
                             $insertValues[$dcol] = $now;
+                        }
+                    }
+                    // login_dateなどのNULL許可のタイムスタンプカラムは、空文字列をnullに変換
+                    foreach (['login_date', 'first_buy_date', 'last_buy_date', 'payment_date'] as $dcol) {
+                        if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || strpos($insertValues[$dcol], '0000') === 0)) {
+                            $insertValues[$dcol] = null;
                         }
                     }
                     $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
@@ -2193,6 +2208,12 @@ class ConfigController extends AbstractController
                     } elseif ($columnName == 'authority' && $tableName == 'dtb_member') {
                         // 4.0系ではauthority_idというカラム名
                         $value[$columnName] = isset($data['authority_id']) && $data['authority_id'] !== '' ? $data['authority_id'] : null;
+                    } elseif ($columnName == 'create_date' || $columnName == 'update_date') {
+                        // create_date/update_dateは、空または'0000-00-00 00:00:00'の場合は現在時刻を設定
+                        $value[$columnName] = (isset($data[$columnName]) && $data[$columnName] !== '' && $data[$columnName] != '0000-00-00 00:00:00') ? $data[$columnName] : date('Y-m-d H:i:s');
+                    } elseif ($columnName == 'login_date' || $columnName == 'first_buy_date' || $columnName == 'last_buy_date' || $columnName == 'payment_date') {
+                        // タイムスタンプ型カラムで、NULL許可の場合は、空または'0000-00-00 00:00:00'の場合はnullを設定
+                        $value[$columnName] = (isset($data[$columnName]) && $data[$columnName] !== '' && $data[$columnName] != '0000-00-00 00:00:00') ? $data[$columnName] : null;
                     } elseif ($columnName == 'sex_id' || $columnName == 'job_id' || $columnName == 'country_id' || $columnName == 'pref_id') {
                         // 外部キー制約があるカラムは、空の場合nullを設定（0を設定すると外部キー違反になる）
                         $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
