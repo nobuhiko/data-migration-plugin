@@ -271,7 +271,12 @@ class DataMigrationService
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-        } else {
+        } elseif ($platform == 'postgresql') {
+            // PostgreSQLでは外部キー制約チェックをトランザクション終了時まで遅延
+            $em->exec('SET CONSTRAINTS ALL DEFERRED;');
+        }
+
+        if ($platform != 'mysql') {
             try {
                 switch ($context) {
                     case "Customer":
