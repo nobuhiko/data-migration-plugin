@@ -343,6 +343,12 @@ class ConfigController extends AbstractController
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         } elseif ($column == 'point') {
                             $value[$column] = empty($data[$column]) ? 0 : (int) $data[$column];
+                        } elseif ($column == 'two_factor_auth_enabled' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
+                            // 4.0系には存在しないカラム。デフォルト値として0（無効）を設定
+                            $value[$column] = isset($data[$column]) ? $data[$column] : 0;
+                        } elseif ($column == 'two_factor_auth_key' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
+                            // 4.0系には存在しないカラム。NULLを設定
+                            $value[$column] = isset($data[$column]) ? $data[$column] : null;
                         } elseif ($allow_zero) {
                             $value[$column] = isset($data[$column]) ? $data[$column] : null;
                         } else {
@@ -1081,6 +1087,13 @@ class ConfigController extends AbstractController
                         if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || strpos($insertValues[$dcol], '0000') === 0)) {
                             $insertValues[$dcol] = null;
                         }
+                    }
+                    // 4.0系には存在しないカラムのデフォルト値を設定
+                    if (isset($insertValues['two_factor_auth_enabled']) && $insertValues['two_factor_auth_enabled'] === null) {
+                        $insertValues['two_factor_auth_enabled'] = 0;
+                    }
+                    if (isset($insertValues['two_factor_auth_key']) && $insertValues['two_factor_auth_key'] === null) {
+                        $insertValues['two_factor_auth_key'] = null; // NULL許可
                     }
                     $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
                     $placeholders = implode(',', array_fill(0, count($insertValues), '?'));
