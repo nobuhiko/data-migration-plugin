@@ -1088,7 +1088,7 @@ class ConfigController extends AbstractController
             }
             if ($hasMember) {
                 $this->saveToC($em, $dir, 'dtb_member', null, true);
-                $em->exec('UPDATE dtb_member SET work_id = 0');
+                // work_idはsaveToC内でCSVから正しく設定されているため、ここで上書きしない
             }
             try {
                 $ids = $em->fetchFirstColumn('SELECT id FROM dtb_member');
