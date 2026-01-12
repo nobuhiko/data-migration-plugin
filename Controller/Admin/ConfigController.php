@@ -1001,7 +1001,7 @@ class ConfigController extends AbstractController
      *  - PostgreSQL: mtb_authority を汎用 UPSERT, その後 dtb_member をカスタム UPSERT (全件 work_id=0 強制)
      *  - MySQL: 既存 truncate+insert(saveToC) 後に work_id=0 へ更新
      */
-    private function upsertAuthorityAndMember($em, $dir)
+    protected function upsertAuthorityAndMember($em, $dir)
     {
         $platform = $this->dataMigrationService->begin($em);
         $authorityCsv = $dir . 'mtb_authority.csv';
