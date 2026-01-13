@@ -125,6 +125,30 @@ class ConfigController extends AbstractController
                     'dtb_mail_history'
                 ]);
 
+                // PostgreSQLの場合、全テーブルを一括削除（外部キー制約のため）
+                $platform = $em->getDatabasePlatform()->getName();
+                if ($platform === 'postgresql') {
+                    // CSV内の全テーブルを取得してTRUNCATE CASCADE
+                    $allFiles = scandir($csvDir);
+                    $tablesToTruncate = [];
+                    foreach ($allFiles as $f) {
+                        if (is_file($csvDir . $f) && pathinfo($f, PATHINFO_EXTENSION) === 'csv') {
+                            $tableName = str_replace('.csv', '', $f);
+                            if ($tableName !== 'dtb_member' && $tableName !== 'dtb_plugin') {
+                                $tablesToTruncate[] = '"' . $tableName . '"';
+                            }
+                        }
+                    }
+                    if (!empty($tablesToTruncate)) {
+                        try {
+                            $sql = 'TRUNCATE TABLE ' . implode(', ', $tablesToTruncate) . ' RESTART IDENTITY CASCADE';
+                            $em->exec($sql);
+                        } catch (\Exception $e) {
+                            error_log('TRUNCATE CASCADE failed: ' . $e->getMessage());
+                        }
+                    }
+                }
+
                 // $csvDir 内のファイルをすべて読み込む
                 $files = scandir($csvDir);
                 foreach ($files as $file) {
@@ -2184,7 +2208,11 @@ class ConfigController extends AbstractController
         }
 
         $platform = $this->dataMigrationService->begin($em);
-        $this->dataMigrationService->resetTable($em, $tableName);
+        // PostgreSQLでは外部キー制約のため個別のresetTableは実行せず、
+        // begin()で全テーブルを一括削除する方式に依存
+        if ($platform !== 'postgresql') {
+            $this->dataMigrationService->resetTable($em, $tableName);
+        }
 
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);

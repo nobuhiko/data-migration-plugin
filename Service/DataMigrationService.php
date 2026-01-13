@@ -143,22 +143,9 @@ class DataMigrationService
         if ($platform == 'mysql') {
             $em->exec('DELETE FROM ' . $tableName);
         } elseif ($platform == 'postgresql') {
-            // PostgreSQLでは外部キー制約エラーが発生する可能性がある
-            // セーブポイントを使用してエラー発生時にロールバックし、トランザクションを継続
-            try {
-                $em->exec('SAVEPOINT before_delete');
-                $em->exec('DELETE FROM "' . $tableName . '"');
-                $em->exec('RELEASE SAVEPOINT before_delete');
-            } catch (\Exception $e) {
-                // 外部キー制約エラーが発生した場合、セーブポイントまでロールバック
-                try {
-                    $em->exec('ROLLBACK TO SAVEPOINT before_delete');
-                } catch (\Exception $rollbackEx) {
-                    // ロールバックが失敗した場合もエラーログに記録
-                    error_log("resetTable rollback failed for $tableName: " . $rollbackEx->getMessage());
-                }
-                error_log("resetTable warning for $tableName: " . $e->getMessage());
-            }
+            // PostgreSQLでは fix4x() の場合、事前に全テーブルが TRUNCATE CASCADE されているため
+            // このメソッドは呼ばれないはず
+            $em->exec('DELETE FROM "' . $tableName . '"');
         } else {
             $em->exec('DELETE FROM ' . $tableName);
         }
