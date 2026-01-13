@@ -125,38 +125,8 @@ class ConfigController extends AbstractController
                     'dtb_mail_history'
                 ]);
 
-                // PostgreSQLの場合、全テーブルを一括削除（外部キー制約のため）
-                $platform = $em->getDatabasePlatform()->getName();
-                if ($platform === 'postgresql') {
-                    // CSV内の全テーブルを取得してTRUNCATE CASCADE
-                    // ただし、マスタテーブル（mtb_*）は除外（CASCADEで一緒に削除されるのを防ぐ）
-                    $allFiles = scandir($csvDir);
-                    $tablesToTruncate = [];
-                    foreach ($allFiles as $f) {
-                        if (is_file($csvDir . $f) && pathinfo($f, PATHINFO_EXTENSION) === 'csv') {
-                            $tableName = str_replace('.csv', '', $f);
-                            // dtb_member、dtb_plugin、およびマスタテーブル（mtb_*）はスキップ
-                            if ($tableName !== 'dtb_member' && $tableName !== 'dtb_plugin' && strpos($tableName, 'mtb_') !== 0) {
-                                // テーブルが存在するか確認
-                                $exists = $em->fetchOne("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=?", [$tableName]);
-                                if ($exists) {
-                                    $tablesToTruncate[] = '"' . $tableName . '"';
-                                }
-                            }
-                        }
-                    }
-                    if (!empty($tablesToTruncate)) {
-                        try {
-                            // dtb_* テーブルのみをTRUNCATE（マスタテーブルは個別に処理される）
-                            $sql = 'TRUNCATE TABLE ' . implode(', ', $tablesToTruncate) . ' RESTART IDENTITY CASCADE';
-                            $em->exec($sql);
-                        } catch (\Exception $e) {
-                            error_log('TRUNCATE CASCADE failed: ' . $e->getMessage());
-                        }
-                    }
-                }
-
                 // $csvDir 内のファイルをすべて読み込む
+                // PostgreSQLはUPSERT方式を使うため、TRUNCATE不要
                 $files = scandir($csvDir);
                 foreach ($files as $file) {
                     // csvファイルのみ処理
@@ -2215,10 +2185,21 @@ class ConfigController extends AbstractController
         }
 
         $platform = $this->dataMigrationService->begin($em);
-        // PostgreSQLでは外部キー制約のため個別のresetTableは実行せず、
-        // begin()で全テーブルを一括削除する方式に依存
+
+        // PostgreSQLではUPSERTを使うため、resetTableは不要
+        // MySQLは従来通りresetTable()を使用
         if ($platform !== 'postgresql') {
             $this->dataMigrationService->resetTable($em, $tableName);
+        }
+
+        // PostgreSQLの場合、UPSERT用のプライマリキーを取得
+        $primaryKeys = [];
+        if ($platform === 'postgresql') {
+            $schemaManager = $em->getSchemaManager();
+            $table = $schemaManager->introspectTable($tableName);
+            if ($table->hasPrimaryKey()) {
+                $primaryKeys = $table->getPrimaryKey()->getColumns();
+            }
         }
 
         $builder = new BulkInsertQuery($em, $tableName);
@@ -2276,23 +2257,46 @@ class ConfigController extends AbstractController
                     }
                 }
 
-                $builder->setValues($value);
-
-                if (($i % $batchSize) === 0) {
+                if ($platform === 'postgresql' && !empty($primaryKeys)) {
+                    // PostgreSQLはUPSERTで行ごとに処理
                     try {
-                        $builder->execute();
-                        $this->addSuccess($tableName, 'admin');
+                        $cols = array_map(fn($c) => '"' . $c . '"', array_keys($value));
+                        $placeholders = array_fill(0, count($value), '?');
+                        $updateCols = array_filter(array_keys($value), fn($c) => !in_array($c, $primaryKeys));
+                        $updateSet = array_map(fn($c) => '"' . $c . '" = EXCLUDED."' . $c . '"', $updateCols);
+                        $conflictCols = array_map(fn($c) => '"' . $c . '"', $primaryKeys);
+
+                        $sql = 'INSERT INTO "' . $tableName . '" (' . implode(', ', $cols) . ') ' .
+                               'VALUES (' . implode(', ', $placeholders) . ') ' .
+                               'ON CONFLICT (' . implode(', ', $conflictCols) . ') ' .
+                               'DO UPDATE SET ' . implode(', ', $updateSet);
+
+                        $em->executeStatement($sql, array_values($value));
                     } catch (\Exception $e) {
                         $this->addDanger($e->getMessage(), 'admin');
                         $em->rollback();
                         return;
+                    }
+                } else {
+                    // MySQLはバッチINSERT
+                    $builder->setValues($value);
+
+                    if (($i % $batchSize) === 0) {
+                        try {
+                            $builder->execute();
+                            $this->addSuccess($tableName, 'admin');
+                        } catch (\Exception $e) {
+                            $this->addDanger($e->getMessage(), 'admin');
+                            $em->rollback();
+                            return;
+                        }
                     }
                 }
 
                 $i++;
             }
 
-            if (count($builder->getValues()) > 0) {
+            if ($platform !== 'postgresql' && count($builder->getValues()) > 0) {
                 try {
                     $builder->execute();
                     $this->addSuccess($tableName, 'admin');
