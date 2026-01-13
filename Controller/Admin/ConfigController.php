@@ -129,12 +129,14 @@ class ConfigController extends AbstractController
                 $platform = $em->getDatabasePlatform()->getName();
                 if ($platform === 'postgresql') {
                     // CSV内の全テーブルを取得してTRUNCATE CASCADE
+                    // ただし、マスタテーブル（mtb_*）は除外（CASCADEで一緒に削除されるのを防ぐ）
                     $allFiles = scandir($csvDir);
                     $tablesToTruncate = [];
                     foreach ($allFiles as $f) {
                         if (is_file($csvDir . $f) && pathinfo($f, PATHINFO_EXTENSION) === 'csv') {
                             $tableName = str_replace('.csv', '', $f);
-                            if ($tableName !== 'dtb_member' && $tableName !== 'dtb_plugin') {
+                            // dtb_member、dtb_plugin、およびマスタテーブル（mtb_*）はスキップ
+                            if ($tableName !== 'dtb_member' && $tableName !== 'dtb_plugin' && strpos($tableName, 'mtb_') !== 0) {
                                 // テーブルが存在するか確認
                                 $exists = $em->fetchOne("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=?", [$tableName]);
                                 if ($exists) {
@@ -145,6 +147,7 @@ class ConfigController extends AbstractController
                     }
                     if (!empty($tablesToTruncate)) {
                         try {
+                            // dtb_* テーブルのみをTRUNCATE（マスタテーブルは個別に処理される）
                             $sql = 'TRUNCATE TABLE ' . implode(', ', $tablesToTruncate) . ' RESTART IDENTITY CASCADE';
                             $em->exec($sql);
                         } catch (\Exception $e) {
