@@ -135,7 +135,11 @@ class ConfigController extends AbstractController
                         if (is_file($csvDir . $f) && pathinfo($f, PATHINFO_EXTENSION) === 'csv') {
                             $tableName = str_replace('.csv', '', $f);
                             if ($tableName !== 'dtb_member' && $tableName !== 'dtb_plugin') {
-                                $tablesToTruncate[] = '"' . $tableName . '"';
+                                // テーブルが存在するか確認
+                                $exists = $em->fetchOne("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=?", [$tableName]);
+                                if ($exists) {
+                                    $tablesToTruncate[] = '"' . $tableName . '"';
+                                }
                             }
                         }
                     }
