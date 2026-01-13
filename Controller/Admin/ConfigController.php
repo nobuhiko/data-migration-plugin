@@ -126,6 +126,7 @@ class ConfigController extends AbstractController
                 ]);
 
                 // $csvDir 内のファイルをすべて読み込む
+                // PostgreSQLはUPSERT方式を使うため、TRUNCATE不要
                 $files = scandir($csvDir);
                 foreach ($files as $file) {
                     // csvファイルのみ処理
@@ -343,6 +344,12 @@ class ConfigController extends AbstractController
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         } elseif ($column == 'point') {
                             $value[$column] = empty($data[$column]) ? 0 : (int) $data[$column];
+                        } elseif ($column == 'two_factor_auth_enabled' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
+                            // 4.0系には存在しないカラム。デフォルト値として0（無効）を設定
+                            $value[$column] = isset($data[$column]) ? $data[$column] : 0;
+                        } elseif ($column == 'two_factor_auth_key' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
+                            // 4.0系には存在しないカラム。NULLを設定
+                            $value[$column] = isset($data[$column]) ? $data[$column] : null;
                         } elseif ($allow_zero) {
                             $value[$column] = isset($data[$column]) ? $data[$column] : null;
                         } else {
@@ -399,6 +406,9 @@ class ConfigController extends AbstractController
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         } elseif ($column == 'creator_id') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 1;
+                        } elseif ($column == 'two_factor_auth_enabled' && $tableName == 'dtb_member') {
+                            // 4.0系には存在しないカラム。デフォルト値として0（無効）を設定
+                            $value[$column] = isset($data[$column]) ? $data[$column] : 0;
                         } elseif ($column == 'plg_mailmagazine_flg') {
                             $value[$column] = (!empty($data['mailmaga_flg']) && $data['mailmaga_flg'] != 3) ? 1 : 0;
                         } elseif ($column == 'id' && $tableName == 'dtb_member') {
@@ -1050,6 +1060,15 @@ class ConfigController extends AbstractController
                             $insertValues[$col] = $data[$col] ?? 'member';
                             continue;
                         }
+                        // 4.0系のカラム名マッピング
+                        if ($col === 'work' && !array_key_exists($col, $data) && array_key_exists('work_id', $data)) {
+                            $insertValues[$col] = $data['work_id'];
+                            continue;
+                        }
+                        if ($col === 'authority' && !array_key_exists($col, $data) && array_key_exists('authority_id', $data)) {
+                            $insertValues[$col] = $data['authority_id'];
+                            continue;
+                        }
                         if (array_key_exists($col, $data)) {
                             $insertValues[$col] = $data[$col];
                         } else {
@@ -1063,6 +1082,19 @@ class ConfigController extends AbstractController
                         if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || strpos($insertValues[$dcol], '0000') === 0)) {
                             $insertValues[$dcol] = $now;
                         }
+                    }
+                    // login_dateなどのNULL許可のタイムスタンプカラムは、空文字列をnullに変換
+                    foreach (['login_date', 'first_buy_date', 'last_buy_date', 'payment_date'] as $dcol) {
+                        if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || strpos($insertValues[$dcol], '0000') === 0)) {
+                            $insertValues[$dcol] = null;
+                        }
+                    }
+                    // 4.0系には存在しないカラムのデフォルト値を設定
+                    if (array_key_exists('two_factor_auth_enabled', $insertValues) && $insertValues['two_factor_auth_enabled'] === null) {
+                        $insertValues['two_factor_auth_enabled'] = 0;
+                    }
+                    if (array_key_exists('two_factor_auth_key', $insertValues) && $insertValues['two_factor_auth_key'] === null) {
+                        $insertValues['two_factor_auth_key'] = null; // NULL許可（この行は冗長だが明示的に残す）
                     }
                     $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
                     $placeholders = implode(',', array_fill(0, count($insertValues), '?'));
@@ -2153,7 +2185,22 @@ class ConfigController extends AbstractController
         }
 
         $platform = $this->dataMigrationService->begin($em);
-        $this->dataMigrationService->resetTable($em, $tableName);
+
+        // PostgreSQLではUPSERTを使うため、resetTableは不要
+        // MySQLは従来通りresetTable()を使用
+        if ($platform !== 'postgresql') {
+            $this->dataMigrationService->resetTable($em, $tableName);
+        }
+
+        // PostgreSQLの場合、UPSERT用のプライマリキーを取得
+        $primaryKeys = [];
+        if ($platform === 'postgresql') {
+            $schemaManager = $em->getSchemaManager();
+            $table = $schemaManager->introspectTable($tableName);
+            if ($table->hasPrimaryKey()) {
+                $primaryKeys = $table->getPrimaryKey()->getColumns();
+            }
+        }
 
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
@@ -2176,30 +2223,80 @@ class ConfigController extends AbstractController
                 foreach ($columns as $column) {
 
                     $columnName = $column->getName();
-                    if ($column->getNotNull()) {
+
+                    // 特定カラムの処理
+                    if ($columnName == 'two_factor_auth_enabled' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
+                        // 4.0系には存在しないカラム。デフォルト値として0（無効）を設定
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : 0;
+                    } elseif ($columnName == 'two_factor_auth_key' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
+                        // 4.0系には存在しないカラム。NULLを設定
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
+                    } elseif ($columnName == 'work' && $tableName == 'dtb_member') {
+                        // 4.0系ではwork_idというカラム名
+                        $value[$columnName] = isset($data['work_id']) && $data['work_id'] !== '' ? $data['work_id'] : null;
+                    } elseif ($columnName == 'authority' && $tableName == 'dtb_member') {
+                        // 4.0系ではauthority_idというカラム名
+                        $value[$columnName] = isset($data['authority_id']) && $data['authority_id'] !== '' ? $data['authority_id'] : null;
+                    } elseif ($columnName == 'create_date' || $columnName == 'update_date') {
+                        // create_date/update_dateは、空または'0000-00-00 00:00:00'の場合は現在時刻を設定
+                        $value[$columnName] = (isset($data[$columnName]) && $data[$columnName] !== '' && $data[$columnName] != '0000-00-00 00:00:00') ? $data[$columnName] : date('Y-m-d H:i:s');
+                    } elseif ($columnName == 'login_date' || $columnName == 'first_buy_date' || $columnName == 'last_buy_date' || $columnName == 'payment_date') {
+                        // タイムスタンプ型カラムで、NULL許可の場合は、空または'0000-00-00 00:00:00'の場合はnullを設定
+                        $value[$columnName] = (isset($data[$columnName]) && $data[$columnName] !== '' && $data[$columnName] != '0000-00-00 00:00:00') ? $data[$columnName] : null;
+                    } elseif ($columnName == 'sex_id' || $columnName == 'job_id' || $columnName == 'country_id' || $columnName == 'pref_id') {
+                        // 外部キー制約があるカラムは、空の場合nullを設定（0を設定すると外部キー違反になる）
+                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
+                    } elseif ($columnName == 'discriminator_type') {
+                        // discriminator_typeは、テーブル名から生成
+                        $search = ['dtb_', 'mtb_', '_'];
+                        $value[$columnName] = str_replace($search, '', $tableName);
+                    } elseif ($column->getNotNull()) {
                         $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : 0;
                     } else {
                         $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
                     }
                 }
 
-                $builder->setValues($value);
-
-                if (($i % $batchSize) === 0) {
+                if ($platform === 'postgresql' && !empty($primaryKeys)) {
+                    // PostgreSQLはUPSERTで行ごとに処理
                     try {
-                        $builder->execute();
-                        $this->addSuccess($tableName, 'admin');
+                        $cols = array_map(fn($c) => '"' . $c . '"', array_keys($value));
+                        $placeholders = array_fill(0, count($value), '?');
+                        $updateCols = array_filter(array_keys($value), fn($c) => !in_array($c, $primaryKeys));
+                        $updateSet = array_map(fn($c) => '"' . $c . '" = EXCLUDED."' . $c . '"', $updateCols);
+                        $conflictCols = array_map(fn($c) => '"' . $c . '"', $primaryKeys);
+
+                        $sql = 'INSERT INTO "' . $tableName . '" (' . implode(', ', $cols) . ') ' .
+                               'VALUES (' . implode(', ', $placeholders) . ') ' .
+                               'ON CONFLICT (' . implode(', ', $conflictCols) . ') ' .
+                               'DO UPDATE SET ' . implode(', ', $updateSet);
+
+                        $em->executeStatement($sql, array_values($value));
                     } catch (\Exception $e) {
                         $this->addDanger($e->getMessage(), 'admin');
                         $em->rollback();
                         return;
+                    }
+                } else {
+                    // MySQLはバッチINSERT
+                    $builder->setValues($value);
+
+                    if (($i % $batchSize) === 0) {
+                        try {
+                            $builder->execute();
+                            $this->addSuccess($tableName, 'admin');
+                        } catch (\Exception $e) {
+                            $this->addDanger($e->getMessage(), 'admin');
+                            $em->rollback();
+                            return;
+                        }
                     }
                 }
 
                 $i++;
             }
 
-            if (count($builder->getValues()) > 0) {
+            if ($platform !== 'postgresql' && count($builder->getValues()) > 0) {
                 try {
                     $builder->execute();
                     $this->addSuccess($tableName, 'admin');

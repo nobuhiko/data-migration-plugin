@@ -142,6 +142,10 @@ class DataMigrationService
 
         if ($platform == 'mysql') {
             $em->exec('DELETE FROM ' . $tableName);
+        } elseif ($platform == 'postgresql') {
+            // PostgreSQLでは fix4x() はUPSERTを使うため、このメソッドは呼ばれない
+            // saveToC() などから呼ばれる場合はDELETEを実行
+            $em->exec('DELETE FROM "' . $tableName . '"');
         } else {
             $em->exec('DELETE FROM ' . $tableName);
         }
@@ -271,7 +275,13 @@ class DataMigrationService
         if ($platform == 'mysql') {
             $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
             $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
-        } else {
+        } elseif ($platform == 'postgresql') {
+            // PostgreSQLでは外部キー制約チェックをトランザクション終了時まで遅延
+            // fix4x()ではUPSERTを使うため不要だが、他の処理（saveToC等）のために残す
+            $em->exec('SET CONSTRAINTS ALL DEFERRED;');
+        }
+
+        if ($platform != 'mysql') {
             try {
                 switch ($context) {
                     case "Customer":
