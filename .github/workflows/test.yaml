@@ -74,11 +74,19 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
 
+      - name: Checkout ECCUBE2Downloads
+        uses: actions/checkout@v3
+        with:
+          repository: "nobuhiko/ECCUBE2Downloads"
+          ref: "main"
+          path: "ECCUBE2Downloads"
+
       - name: Archive Plugin
         env:
           PLUGIN_CODE: ${{ matrix.plugin_code }}
         run: |
-          tar cvzf ${GITHUB_WORKSPACE}/${PLUGIN_CODE}.tar.gz ./*
+          tar cvzf ${GITHUB_WORKSPACE}/${PLUGIN_CODE}.tar.gz --exclude=./ECCUBE2Downloads ./*
+          cd ${GITHUB_WORKSPACE}/ECCUBE2Downloads && tar cvzf ${GITHUB_WORKSPACE}/ECCUBE2Downloads.tar.gz ./*
 
       - name: Setup mock-package-api
         env:
@@ -86,6 +94,7 @@ jobs:
         run: |
           mkdir -p /tmp/repos
           cp ${GITHUB_WORKSPACE}/${PLUGIN_CODE}.tar.gz /tmp/repos/${PLUGIN_CODE}.tgz
+          cp ${GITHUB_WORKSPACE}/ECCUBE2Downloads.tar.gz /tmp/repos/ECCUBE2Downloads.tgz
             docker run --name package-api -d -v /tmp/repos:/repos -e MOCK_REPO_DIR=/repos -p 8080:8080 eccube/mock-package-api:composer2
 
       - name: Checkout EC-CUBE
@@ -135,6 +144,9 @@ jobs:
         working-directory: "ec-cube"
         run: |
           bin/console doctrine:query:sql "update dtb_base_info set authentication_key='dummy'"
+          bin/console eccube:composer:require ec-cube/eccube2downloads
+          bin/console cache:clear --no-warmup
+          bin/console eccube:plugin:enable --code=ECCUBE2Downloads
           bin/console eccube:composer:require ec-cube/datamigration43
           bin/console cache:clear --no-warmup
           bin/console eccube:plugin:enable --code=${PLUGIN_CODE}
