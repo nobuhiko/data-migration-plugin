@@ -143,14 +143,14 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
 
             // ダウンロード商品(product_id=3)のsale_type_idが222であること
             $saleTypeId = $conn->fetchOne(
-                "SELECT sale_type_id FROM dtb_product_class WHERE product_id = ? AND visible = 1",
+                "SELECT sale_type_id FROM dtb_product_class WHERE product_id = ? AND visible = true",
                 [3]
             );
             self::assertEquals(222, (int)$saleTypeId, 'ダウンロード商品のsale_type_idが222であること');
 
             // 通常商品(product_id=1)のsale_type_idが222でないこと
             $normalSaleTypeId = $conn->fetchOne(
-                "SELECT sale_type_id FROM dtb_product_class WHERE product_id = ? AND visible = 1 LIMIT 1",
+                "SELECT sale_type_id FROM dtb_product_class WHERE product_id = ? AND visible = true LIMIT 1",
                 [1]
             );
             self::assertNotEquals(222, (int)$normalSaleTypeId, '通常商品のsale_type_idは222でないこと');
@@ -164,13 +164,13 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
 
             // down_filename, down_realfilenameが移行されていること
             $downFilename = $conn->fetchOne(
-                "SELECT down_filename FROM dtb_product_class WHERE product_id = ? AND visible = 1",
+                "SELECT down_filename FROM dtb_product_class WHERE product_id = ? AND visible = true",
                 [3]
             );
             self::assertEquals('おなべレシピ.pdf', $downFilename, 'down_filenameが移行されていること');
 
             $downRealfilename = $conn->fetchOne(
-                "SELECT down_realfilename FROM dtb_product_class WHERE product_id = ? AND visible = 1",
+                "SELECT down_realfilename FROM dtb_product_class WHERE product_id = ? AND visible = true",
                 [3]
             );
             self::assertEquals('recipe_onabe.pdf', $downRealfilename, 'down_realfilenameが移行されていること');
