@@ -117,13 +117,6 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
         $project_dir = $container->getParameter('kernel.project_dir');
         $conn = $this->entityManager->getConnection();
 
-        // ECCUBE2Downloadsプラグインをインストール済みとしてdtb_pluginに登録
-        $now = (new \DateTime())->format('Y-m-d H:i:s');
-        $conn->executeStatement(
-            "INSERT INTO dtb_plugin (name, code, enabled, version, source, initialized, create_date, update_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ['ECCUBE2Downloads', 'ECCUBE2Downloads', false, '1.0.0', '', false, $now, $now]
-        );
-
         $file = $project_dir . '/app/Plugin/DataMigration43/Tests/Fixtures/2_13_5.tar.gz';
         $testFile = $project_dir . '/app/Plugin/DataMigration43/Tests/Fixtures/test.tar.gz';
 
@@ -169,21 +162,18 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             );
             self::assertEquals(222, (int)$delivSaleTypeId, 'ダウンロード配送のsale_type_idが222であること');
 
-            // down_filename, down_realfilenameが移行されていること（ECCUBE2Downloadsがインストールされている場合のみカラムが存在する）
-            $columns = $conn->fetchFirstColumn("SELECT column_name FROM information_schema.columns WHERE table_name = 'dtb_product_class' AND column_name = 'down_filename'");
-            if (!empty($columns)) {
-                $downFilename = $conn->fetchOne(
-                    "SELECT down_filename FROM dtb_product_class WHERE product_id = ? AND visible = 1",
-                    [3]
-                );
-                self::assertEquals('おなべレシピ.pdf', $downFilename, 'down_filenameが移行されていること');
+            // down_filename, down_realfilenameが移行されていること
+            $downFilename = $conn->fetchOne(
+                "SELECT down_filename FROM dtb_product_class WHERE product_id = ? AND visible = 1",
+                [3]
+            );
+            self::assertEquals('おなべレシピ.pdf', $downFilename, 'down_filenameが移行されていること');
 
-                $downRealfilename = $conn->fetchOne(
-                    "SELECT down_realfilename FROM dtb_product_class WHERE product_id = ? AND visible = 1",
-                    [3]
-                );
-                self::assertEquals('recipe_onabe.pdf', $downRealfilename, 'down_realfilenameが移行されていること');
-            }
+            $downRealfilename = $conn->fetchOne(
+                "SELECT down_realfilename FROM dtb_product_class WHERE product_id = ? AND visible = 1",
+                [3]
+            );
+            self::assertEquals('recipe_onabe.pdf', $downRealfilename, 'down_realfilenameが移行されていること');
         } catch (\Exception $e) {
             if ($this->entityManager->getConnection()->isTransactionActive()) {
                 $this->entityManager->getConnection()->rollBack();
