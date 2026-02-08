@@ -472,6 +472,24 @@ class ConfigController extends AbstractController
         if (file_exists($csvDir . $product_db_name . '.csv') && filesize($csvDir . $product_db_name . '.csv') > 0) {
             $platform = $this->dataMigrationService->begin($em, "Product");
 
+            // ECCUBE2Downloads がインストール済みの場合、ダウンロード商品の product_type_id を検出
+            if (file_exists($csvDir . 'mtb_product_type.csv') && $this->dataMigrationService->isPluginInstalled($em, 'ECCUBE2Downloads')) {
+                $csvFile = $csvDir . 'mtb_product_type.csv';
+                if (($handle = fopen($csvFile, 'r')) !== false) {
+                    $key = fgetcsv($handle);
+                    $key = array_filter(array_map('trim', $key));
+                    while (($row = fgetcsv($handle)) !== false) {
+                        $data = array_combine($key, $row);
+                        $name = $data['name'] ?? '';
+                        if (mb_strpos($name, 'ダウンロード') !== false) {
+                            $this->downloadProductTypeId = (int)($data['id'] ?? 0);
+                            break;
+                        }
+                    }
+                    fclose($handle);
+                }
+            }
+
             // 2.11系の処理
             if (file_exists($csvDir . 'dtb_class_combination.csv')) {
                 $this->fix211classCombination($em, $platform, $csvDir);
@@ -508,23 +526,6 @@ class ConfigController extends AbstractController
                 $this->saveProductImage($em);
             }
             if (file_exists($csvDir . 'mtb_product_type.csv')) {
-                // ECCUBE2Downloads がインストール済みの場合、ダウンロード商品の product_type_id を検出
-                if ($this->dataMigrationService->isPluginInstalled($em, 'ECCUBE2Downloads')) {
-                    $csvFile = $csvDir . 'mtb_product_type.csv';
-                    if (file_exists($csvFile) && ($handle = fopen($csvFile, 'r')) !== false) {
-                        $key = fgetcsv($handle);
-                        $key = array_filter(array_map('trim', $key));
-                        while (($row = fgetcsv($handle)) !== false) {
-                            $data = array_combine($key, $row);
-                            $name = $data['name'] ?? '';
-                            if (mb_strpos($name, 'ダウンロード') !== false) {
-                                $this->downloadProductTypeId = (int)($data['id'] ?? 0);
-                                break;
-                            }
-                        }
-                        fclose($handle);
-                    }
-                }
                 // デフォルト判定により discriminator / rank->sort_no マッピングは upsertMaster 内で自動適用
                 $this->upsertMaster($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
             }
