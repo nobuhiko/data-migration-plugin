@@ -85,7 +85,7 @@ jobs:
         env:
           PLUGIN_CODE: ${{ matrix.plugin_code }}
         run: |
-          tar cvzf ${GITHUB_WORKSPACE}/${PLUGIN_CODE}.tar.gz ./*
+          tar cvzf ${GITHUB_WORKSPACE}/${PLUGIN_CODE}.tar.gz --exclude=./ECCUBE2Downloads ./*
           cd ${GITHUB_WORKSPACE}/ECCUBE2Downloads && tar cvzf ${GITHUB_WORKSPACE}/ECCUBE2Downloads.tar.gz ./*
 
       - name: Setup mock-package-api
