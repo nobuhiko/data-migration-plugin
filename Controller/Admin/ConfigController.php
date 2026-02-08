@@ -159,8 +159,11 @@ class ConfigController extends AbstractController
 
                     // 全データ移行
                     $this->saveCustomer($em, $csvDir);
+                    $this->releaseCustomerPhaseMemory();
                     $this->saveProduct($em, $csvDir);
+                    $this->releaseProductPhaseMemory();
                     $this->saveOrder($em, $csvDir);
+                    $this->releaseOrderPhaseMemory();
                 }
 
                 // plg_customerplusの移行処理を作る
@@ -1832,8 +1835,10 @@ class ConfigController extends AbstractController
                             }
                         }
 
-                        // shippingに紐付けるデータを保持
-                        $this->shipping_order[$data['id']] = $data;
+                        // shippingに紐付けるデータを保持（必要なフィールドのみ）
+                        $this->shipping_order[$data['id']] = [
+                            'commit_date' => $data['commit_date'] ?? null,
+                        ];
 
                         break;
 
@@ -2342,5 +2347,31 @@ class ConfigController extends AbstractController
 
             return $i; // indexを返す
         }
+    }
+
+    private function releaseCustomerPhaseMemory(): void
+    {
+        $this->customer_point = [];
+        gc_collect_cycles();
+    }
+
+    private function releaseProductPhaseMemory(): void
+    {
+        $this->stock = [];
+        $this->product_images = [];
+        $this->dtb_class_combination = [];
+        $this->delivery_id = [];
+        $this->product_class_id = [];
+        gc_collect_cycles();
+    }
+
+    private function releaseOrderPhaseMemory(): void
+    {
+        $this->order_item = [];
+        $this->shipping_id = [];
+        $this->shipping_order = [];
+        $this->tax_rule = [];
+        $this->delivery_time = [];
+        gc_collect_cycles();
     }
 }
