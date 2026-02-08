@@ -106,4 +106,87 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             throw $e;
         }
     }
+
+    /**
+     * ECCUBE2Downloadsプラグインがインストール済みの場合、
+     * ダウンロード商品のsale_type_idが222に書き換わることをテスト
+     */
+    public function testECCUBE2Downloadsダウンロード商品のsale_type_idが222になる()
+    {
+        $container = self::getContainer();
+        $project_dir = $container->getParameter('kernel.project_dir');
+        $conn = $this->entityManager->getConnection();
+
+        // ECCUBE2Downloadsプラグインをインストール済みとしてdtb_pluginに登録
+        $now = (new \DateTime())->format('Y-m-d H:i:s');
+        $conn->executeStatement(
+            "INSERT INTO dtb_plugin (name, code, enabled, version, source, initialized, create_date, update_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ['ECCUBE2Downloads', 'ECCUBE2Downloads', false, '1.0.0', '', false, $now, $now]
+        );
+
+        $file = $project_dir . '/app/Plugin/DataMigration43/Tests/Fixtures/2_13_5.tar.gz';
+        $testFile = $project_dir . '/app/Plugin/DataMigration43/Tests/Fixtures/test.tar.gz';
+
+        $fs = new Filesystem();
+        $fs->copy($file, $testFile);
+
+        $file = new UploadedFile($testFile, 'test.tar.gz', 'application/x-tar', null, true);
+
+        $post = [
+            'config' => [
+                Constant::TOKEN_NAME => 'dummy',
+                'import_file' => $file,
+                'auth_magic' => 'dummy',
+            ]
+        ];
+
+        try {
+            $this->client->request(
+                'POST',
+                $this->generateUrl('data_migration43_admin_config'),
+                $post,
+                ['config' => ['import_file' => $file]]
+            );
+
+            // ダウンロード商品(product_id=3)のsale_type_idが222であること
+            $saleTypeId = $conn->fetchOne(
+                "SELECT sale_type_id FROM dtb_product_class WHERE product_id = ? AND visible = 1",
+                [3]
+            );
+            self::assertEquals(222, (int)$saleTypeId, 'ダウンロード商品のsale_type_idが222であること');
+
+            // 通常商品(product_id=1)のsale_type_idが222でないこと
+            $normalSaleTypeId = $conn->fetchOne(
+                "SELECT sale_type_id FROM dtb_product_class WHERE product_id = ? AND visible = 1 LIMIT 1",
+                [1]
+            );
+            self::assertNotEquals(222, (int)$normalSaleTypeId, '通常商品のsale_type_idは222でないこと');
+
+            // ダウンロード配送(product_type_id=2)のdeliveryのsale_type_idが222であること
+            $delivSaleTypeId = $conn->fetchOne(
+                "SELECT sale_type_id FROM dtb_delivery WHERE id = ?",
+                [2]
+            );
+            self::assertEquals(222, (int)$delivSaleTypeId, 'ダウンロード配送のsale_type_idが222であること');
+
+            // down_filename, down_realfilenameが移行されていること
+            $downFilename = $conn->fetchOne(
+                "SELECT down_filename FROM dtb_product_class WHERE product_id = ? AND visible = 1",
+                [3]
+            );
+            self::assertEquals('おなべレシピ.pdf', $downFilename, 'down_filenameが移行されていること');
+
+            $downRealfilename = $conn->fetchOne(
+                "SELECT down_realfilename FROM dtb_product_class WHERE product_id = ? AND visible = 1",
+                [3]
+            );
+            self::assertEquals('recipe_onabe.pdf', $downRealfilename, 'down_realfilenameが移行されていること');
+        } catch (\Exception $e) {
+            if ($this->entityManager->getConnection()->isTransactionActive()) {
+                $this->entityManager->getConnection()->rollBack();
+                $this->entityManager->getConnection()->beginTransaction();
+            }
+            throw $e;
+        }
+    }
 }

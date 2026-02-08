@@ -50,6 +50,8 @@ class ConfigController extends AbstractController
     protected $customer_point = [];
     protected $memberIdSet = null; // array<int,bool>
     protected $missingCreatorIds = []; // array<int,bool>
+    /** @var int|null ECCUBE2Downloads用: 2.xのダウンロード商品 product_type_id */
+    protected $downloadProductTypeId = null;
 
     /**
      * constructor.
@@ -506,6 +508,23 @@ class ConfigController extends AbstractController
                 $this->saveProductImage($em);
             }
             if (file_exists($csvDir . 'mtb_product_type.csv')) {
+                // ECCUBE2Downloads がインストール済みの場合、ダウンロード商品の product_type_id を検出
+                if ($this->dataMigrationService->isPluginInstalled($em, 'ECCUBE2Downloads')) {
+                    $csvFile = $csvDir . 'mtb_product_type.csv';
+                    if (file_exists($csvFile) && ($handle = fopen($csvFile, 'r')) !== false) {
+                        $key = fgetcsv($handle);
+                        $key = array_filter(array_map('trim', $key));
+                        while (($row = fgetcsv($handle)) !== false) {
+                            $data = array_combine($key, $row);
+                            $name = $data['name'] ?? '';
+                            if (mb_strpos($name, 'ダウンロード') !== false) {
+                                $this->downloadProductTypeId = (int)($data['id'] ?? 0);
+                                break;
+                            }
+                        }
+                        fclose($handle);
+                    }
+                }
                 // デフォルト判定により discriminator / rank->sort_no マッピングは upsertMaster 内で自動適用
                 $this->upsertMaster($em, $csvDir, 'mtb_product_type', 'mtb_sale_type', true);
             }
@@ -714,7 +733,12 @@ class ConfigController extends AbstractController
 
                             // ---> dtb_product_class
                         } elseif ($column == 'sale_type_id') {
-                            $value[$column] = isset($data['product_type_id']) ? $data['product_type_id'] : 1;
+                            $productTypeId = isset($data['product_type_id']) ? (int)$data['product_type_id'] : 1;
+                            if ($this->downloadProductTypeId && $productTypeId === $this->downloadProductTypeId) {
+                                $value[$column] = 222; // ECCUBE2Downloads の販売種別ID
+                            } else {
+                                $value[$column] = $productTypeId;
+                            }
                         } elseif ($column == 'class_category_id1') {
                             $value[$column] = !empty($data['classcategory_id1']) ? $data['classcategory_id1'] : null;
 
@@ -1690,7 +1714,12 @@ class ConfigController extends AbstractController
 
                             // --> deliv
                         } elseif ($column == 'sale_type_id') {
-                            $value[$column] = isset($data['product_type_id']) ? $data['product_type_id'] : 1;
+                            $productTypeId = isset($data['product_type_id']) ? (int)$data['product_type_id'] : 1;
+                            if ($this->downloadProductTypeId && $productTypeId === $this->downloadProductTypeId) {
+                                $value[$column] = 222; // ECCUBE2Downloads の販売種別ID
+                            } else {
+                                $value[$column] = $productTypeId;
+                            }
                         } elseif ($column == 'description') {
                             $value[$column] = isset($data['remark']) ? $data['remark'] : null;
                         } elseif ($column == 'delivery_id') {
