@@ -138,7 +138,20 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             ['config' => ['import_file' => $file]]
         );
 
-        $statusCode = $this->client->getResponse()->getStatusCode();
+        $response = $this->client->getResponse();
+        $statusCode = $response->getStatusCode();
+        if ($statusCode === Response::HTTP_INTERNAL_SERVER_ERROR) {
+            // 500エラー時はレスポンスボディからエラー情報を抽出
+            $body = $response->getContent();
+            // HTMLからエラーメッセージを抽出
+            $errorMsg = '';
+            if (preg_match('/<h1[^>]*class="exception-message[^"]*"[^>]*>(.*?)<\/h1>/s', $body, $m)) {
+                $errorMsg = strip_tags($m[1]);
+            } elseif (preg_match('/<title>(.*?)<\/title>/s', $body, $m)) {
+                $errorMsg = strip_tags($m[1]);
+            }
+            self::fail("移行リクエストが500エラーを返しました: " . $errorMsg);
+        }
         self::assertTrue(
             $statusCode === Response::HTTP_FOUND || $statusCode === Response::HTTP_OK,
             "移行リクエストが予期しないステータス {$statusCode} を返しました"
