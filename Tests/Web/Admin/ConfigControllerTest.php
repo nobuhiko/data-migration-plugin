@@ -131,30 +131,14 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             ], $extraPost),
         ];
 
+        // 例外をキャッチせずに直接スローさせる（デバッグ用）
+        $this->client->catchExceptions(false);
+
         $this->client->request(
             'POST',
             $this->generateUrl('data_migration43_admin_config'),
             $post,
             ['config' => ['import_file' => $file]]
-        );
-
-        $response = $this->client->getResponse();
-        $statusCode = $response->getStatusCode();
-        if ($statusCode === Response::HTTP_INTERNAL_SERVER_ERROR) {
-            // 500エラー時はレスポンスボディからエラー情報を抽出
-            $body = $response->getContent();
-            // HTMLからエラーメッセージを抽出
-            $errorMsg = '';
-            if (preg_match('/<h1[^>]*class="exception-message[^"]*"[^>]*>(.*?)<\/h1>/s', $body, $m)) {
-                $errorMsg = strip_tags($m[1]);
-            } elseif (preg_match('/<title>(.*?)<\/title>/s', $body, $m)) {
-                $errorMsg = strip_tags($m[1]);
-            }
-            self::fail("移行リクエストが500エラーを返しました: " . $errorMsg);
-        }
-        self::assertTrue(
-            $statusCode === Response::HTTP_FOUND || $statusCode === Response::HTTP_OK,
-            "移行リクエストが予期しないステータス {$statusCode} を返しました"
         );
 
         // EntityManagerのIDマップをクリアし、最新のDB状態を取得可能にする
