@@ -94,7 +94,13 @@ class ConfigController extends AbstractController
 
             $formFile = $form['import_file']->getData();
 
-            $originalExtension = pathinfo($formFile->getClientOriginalName(), PATHINFO_EXTENSION);
+            $originalName = $formFile->getClientOriginalName();
+            // .tar.gz のような二重拡張子に対応
+            if (preg_match('/\.(tar\.\w+)$/i', $originalName, $m)) {
+                $originalExtension = $m[1];
+            } else {
+                $originalExtension = pathinfo($originalName, PATHINFO_EXTENSION);
+            }
             $tmpFile = 'import_' . bin2hex(random_bytes(8)) . '.' . $originalExtension;
             $tmpDir = $this->pluginService->createTempDir();
             $formFile->move($tmpDir, $tmpFile);
