@@ -212,7 +212,6 @@ class DataMigrationService
             }
         } catch (\Exception $e) {
             error_log("Error in convertDataTypesForPostgreSQL for table '$tableName': " . $e->getMessage());
-            error_log("Data being processed: " . json_encode($data));
             // エラーが発生した場合は元のデータをそのまま返す
         }
 

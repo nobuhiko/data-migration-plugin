@@ -439,8 +439,6 @@ class ConfigController extends AbstractController
                         $builder->execute();
                     } catch (\Exception $e) {
                         error_log("BulkInsertQuery execute error in saveToC table '$tableName' at row $i: " . $e->getMessage());
-                        error_log("Failed data for row $i: " . json_encode($value));
-                        error_log("Original CSV data: " . json_encode($data));
                         throw $e;
                     }
                 }
@@ -2308,7 +2306,8 @@ class ConfigController extends AbstractController
 
                         $em->executeStatement($sql, array_values($value));
                     } catch (\Exception $e) {
-                        $this->addDanger($e->getMessage(), 'admin');
+                        $this->addDanger('データの移行処理でエラーが発生しました。', 'admin');
+                        error_log('DataMigration43 fix4x error: ' . $e->getMessage());
                         $em->rollback();
                         return;
                     }
@@ -2321,7 +2320,8 @@ class ConfigController extends AbstractController
                             $builder->execute();
                             $this->addSuccess($tableName, 'admin');
                         } catch (\Exception $e) {
-                            $this->addDanger($e->getMessage(), 'admin');
+                            $this->addDanger('データの移行処理でエラーが発生しました。', 'admin');
+                            error_log('DataMigration43 fix4x error: ' . $e->getMessage());
                             $em->rollback();
                             return;
                         }
@@ -2336,7 +2336,8 @@ class ConfigController extends AbstractController
                     $builder->execute();
                     $this->addSuccess($tableName, 'admin');
                 } catch (\Exception $e) {
-                    $this->addDanger($e->getMessage(), 'admin');
+                    $this->addDanger('データの移行処理でエラーが発生しました。', 'admin');
+                    error_log('DataMigration43 fix4x error: ' . $e->getMessage());
                     $em->rollback();
                     return;
                 }
