@@ -94,7 +94,8 @@ class ConfigController extends AbstractController
 
             $formFile = $form['import_file']->getData();
 
-            $tmpFile = $formFile->getClientOriginalName();
+            $originalExtension = pathinfo($formFile->getClientOriginalName(), PATHINFO_EXTENSION);
+            $tmpFile = 'import_' . bin2hex(random_bytes(8)) . '.' . $originalExtension;
             $tmpDir = $this->pluginService->createTempDir();
             $formFile->move($tmpDir, $tmpFile);
 

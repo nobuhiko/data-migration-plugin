@@ -80,6 +80,15 @@ class DataMigrationService
     {
         $archive = UnifiedArchive::open($tmpDir . '/' . $tmpFile);
         $fileNames = $archive->getFileNames();
+
+        // パストラバーサル防御: アーカイブ内のエントリ名を検証
+        foreach ($fileNames as $entry) {
+            $normalized = str_replace('\\', '/', $entry);
+            if (strpos($normalized, '..') !== false || strpos($normalized, '/') === 0) {
+                throw new \RuntimeException('アーカイブに不正なパスが含まれています: ' . basename($entry));
+            }
+        }
+
         // 解凍
         $archive->extractFiles($tmpDir, $fileNames);
 
