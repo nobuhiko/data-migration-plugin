@@ -126,6 +126,11 @@ class DataMigrationService
 
     public function updateEnv($newMagicValue)
     {
+        $newMagicValue = preg_replace('/[\r\n]/', '', $newMagicValue);
+        if (!preg_match('/^[a-zA-Z0-9_\-\.]+$/', $newMagicValue)) {
+            throw new \InvalidArgumentException('AUTH_MAGIC contains invalid characters.');
+        }
+
         $projectDir = $this->params->get('kernel.project_dir');
         $envFile = $projectDir . '/.env';
 
@@ -212,7 +217,6 @@ class DataMigrationService
             }
         } catch (\Exception $e) {
             error_log("Error in convertDataTypesForPostgreSQL for table '$tableName': " . $e->getMessage());
-            error_log("Data being processed: " . json_encode($data));
             // エラーが発生した場合は元のデータをそのまま返す
         }
 
