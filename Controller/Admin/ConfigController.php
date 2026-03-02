@@ -1088,7 +1088,25 @@ class ConfigController extends AbstractController
                             $insertValues[$col] = $data[$col] ?? 'member';
                             continue;
                         }
-                        // 4.0系のカラム名マッピング
+                        // 2.x系: member_id → id
+                        if ($col === 'id' && !array_key_exists('id', $data) && array_key_exists('member_id', $data)) {
+                            $insertValues[$col] = $data['member_id'];
+                            continue;
+                        }
+                        // 2.x系: authority → authority_id, work → work_id
+                        if ($col === 'authority_id' && !array_key_exists($col, $data) && array_key_exists('authority', $data)) {
+                            $insertValues[$col] = $data['authority'];
+                            continue;
+                        }
+                        if ($col === 'work_id' && !array_key_exists($col, $data) && array_key_exists('work', $data)) {
+                            $insertValues[$col] = ($data['del_flg'] ?? '0') === '1' ? 0 : $data['work'];
+                            continue;
+                        }
+                        if ($col === 'sort_no' && !array_key_exists($col, $data) && array_key_exists('rank', $data)) {
+                            $insertValues[$col] = $data['rank'];
+                            continue;
+                        }
+                        // 4.0系: work_id → work, authority_id → authority
                         if ($col === 'work' && !array_key_exists($col, $data) && array_key_exists('work_id', $data)) {
                             $insertValues[$col] = $data['work_id'];
                             continue;
