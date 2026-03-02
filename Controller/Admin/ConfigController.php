@@ -95,11 +95,15 @@ class ConfigController extends AbstractController
             $formFile = $form['import_file']->getData();
 
             $originalName = $formFile->getClientOriginalName();
-            // .tar.gz のような二重拡張子に対応
-            if (preg_match('/\.(tar\.\w+)$/i', $originalName, $m)) {
-                $originalExtension = $m[1];
-            } else {
-                $originalExtension = pathinfo($originalName, PATHINFO_EXTENSION);
+            // 許可された拡張子のホワイトリスト（二重拡張子を先に判定）
+            $allowedExtensions = ['tar.gz', 'tar.bz2', 'tgz', 'tar', 'zip'];
+            $originalExtension = pathinfo($originalName, PATHINFO_EXTENSION);
+            $lowerName = strtolower($originalName);
+            foreach ($allowedExtensions as $ext) {
+                if (substr($lowerName, -strlen('.' . $ext)) === '.' . $ext) {
+                    $originalExtension = $ext;
+                    break;
+                }
             }
             $tmpFile = 'import_' . bin2hex(random_bytes(8)) . '.' . $originalExtension;
             $tmpDir = $this->pluginService->createTempDir();
