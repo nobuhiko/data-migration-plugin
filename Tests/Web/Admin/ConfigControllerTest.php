@@ -131,14 +131,17 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
             ], $extraPost),
         ];
 
-        // 例外をキャッチせずに直接スローさせる（デバッグ用）
-        $this->client->catchExceptions(false);
-
         $this->client->request(
             'POST',
             $this->generateUrl('data_migration43_admin_config'),
             $post,
             ['config' => ['import_file' => $file]]
+        );
+
+        $response = $this->client->getResponse();
+        self::assertTrue(
+            $response->isRedirection(),
+            'Migration should redirect on success (got HTTP ' . $response->getStatusCode() . ')'
         );
 
         // EntityManagerのIDマップをクリアし、最新のDB状態を取得可能にする
