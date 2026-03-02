@@ -142,19 +142,21 @@ class DataMigrationService
         file_put_contents($envFile, $env);
     }
 
+    /**
+     * テーブル名のバリデーション
+     */
+    private function validateTableName(string $tableName): void
+    {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/', $tableName)) {
+            throw new \InvalidArgumentException('Invalid table name: ' . $tableName);
+        }
+    }
+
     public function resetTable(Connection $em, $tableName)
     {
-        $platform = $em->getDatabasePlatform()->getName();
-
-        if ($platform == 'mysql') {
-            $em->exec('DELETE FROM ' . $tableName);
-        } elseif ($platform == 'postgresql') {
-            // PostgreSQLでは fix4x() はUPSERTを使うため、このメソッドは呼ばれない
-            // saveToC() などから呼ばれる場合はDELETEを実行
-            $em->exec('DELETE FROM "' . $tableName . '"');
-        } else {
-            $em->exec('DELETE FROM ' . $tableName);
-        }
+        $this->validateTableName($tableName);
+        $quoted = $em->quoteIdentifier($tableName);
+        $em->executeStatement('DELETE FROM ' . $quoted);
     }
 
     public function convertNULL($data)
@@ -314,7 +316,7 @@ class DataMigrationService
                 foreach ($targetTables as $t) {
                     $exists = $em->fetchOne("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=?", [$t]);
                     if ($exists) {
-                        $existing[] = '"' . str_replace('"', '""', $t) . '"';
+                        $existing[] = $em->quoteIdentifier($t);
                     }
                 }
                 if ($existing) {
@@ -333,11 +335,13 @@ class DataMigrationService
 
     public function setIdSeq($em, $tableName)
     {
-        $max = $em->fetchOne('SELECT coalesce(max(id), 0) + 1  FROM ' . $tableName);
+        $this->validateTableName($tableName);
+        $quoted = $em->quoteIdentifier($tableName);
+        $max = (int) $em->fetchOne('SELECT COALESCE(MAX(id), 0) + 1 FROM ' . $quoted);
         $seq = $tableName . '_id_seq';
-        $count = $em->fetchOne("select count(*) from pg_class where relname = '$seq';");
+        $count = $em->fetchOne('SELECT COUNT(*) FROM pg_class WHERE relname = ?', [$seq]);
         if ($count) {
-            $em->exec("SELECT setval('$seq', $max);");
+            $em->executeStatement('SELECT setval(?, ?)', [$seq, $max]);
         }
     }
 
