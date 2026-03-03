@@ -439,8 +439,6 @@ class ConfigController extends AbstractController
                         $builder->execute();
                     } catch (\Exception $e) {
                         error_log("BulkInsertQuery execute error in saveToC table '$tableName' at row $i: " . $e->getMessage());
-                        error_log("Failed data for row $i: " . json_encode($value));
-                        error_log("Original CSV data: " . json_encode($data));
                         throw $e;
                     }
                 }
