@@ -45,6 +45,12 @@ class DataMigrationService
     private $mappingCache = [];
 
     /**
+     * テーブルカラム情報のキャッシュ（テーブル名 => カラム配列）
+     * @var array
+     */
+    private $tableColumnsCache = [];
+
+    /**
      * Customer item option data for migration
      * @var array
      */
@@ -178,7 +184,10 @@ class DataMigrationService
 
 
         try {
-            $columns = $em->getSchemaManager()->listTableColumns($tableName);
+            if (!isset($this->tableColumnsCache[$tableName])) {
+                $this->tableColumnsCache[$tableName] = $em->getSchemaManager()->listTableColumns($tableName);
+            }
+            $columns = $this->tableColumnsCache[$tableName];
             $hasConversion = false;
 
             foreach ($data as $key => &$value) {
