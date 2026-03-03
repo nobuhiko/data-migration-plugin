@@ -1070,8 +1070,14 @@ class ConfigController extends AbstractController
                 ]);
             }
             if ($hasMember) {
-                // 既存メンバーを一旦非稼働化
-                $em->exec('UPDATE dtb_member SET work_id = 0');
+                // 2.x系の場合はDELETE+INSERTで全置換（MySQL saveToC と同等）
+                $is2xData = !$this->dataMigrationService->isVersion('4.0/4.1');
+                if ($is2xData) {
+                    $this->dataMigrationService->resetTable($em, 'dtb_member');
+                } else {
+                    // 4.0/4.1系：既存メンバーを一旦非稼働化してUPSERT
+                    $em->exec('UPDATE dtb_member SET work_id = 0');
+                }
                 // CSV を読み取り UPSERT
                 $file = $memberCsv;
                 if (($handle = fopen($file, 'r')) === false) {
@@ -1151,8 +1157,14 @@ class ConfigController extends AbstractController
                         $insertValues['two_factor_auth_enabled'] = 0;
                     }
                     if (array_key_exists('two_factor_auth_key', $insertValues) && $insertValues['two_factor_auth_key'] === null) {
-                        $insertValues['two_factor_auth_key'] = null; // NULL許可（この行は冗長だが明示的に残す）
+                        $insertValues['two_factor_auth_key'] = null;
                     }
+                    // saveToC と同等: creator_id のデフォルト値
+                    if (array_key_exists('creator_id', $insertValues) && empty($insertValues['creator_id'])) {
+                        $insertValues['creator_id'] = 1;
+                    }
+                    // PostgreSQL用の型変換
+                    $insertValues = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, 'dtb_member', $insertValues);
                     $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
                     $placeholders = implode(',', array_fill(0, count($insertValues), '?'));
                     $updateSql = implode(', ', array_map(fn($c) => '"' . $c . '" = EXCLUDED."' . $c . '"', $updateCols));
@@ -1160,6 +1172,8 @@ class ConfigController extends AbstractController
                     $em->prepare($sql)->executeStatement(array_values($insertValues));
                 }
                 fclose($handle);
+                // PostgreSQL: シーケンスを最大ID+1にリセット
+                $this->dataMigrationService->setIdSeq($em, 'dtb_member');
             }
             // メンバーIDキャッシュ
             try {
