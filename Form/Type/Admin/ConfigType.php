@@ -9,6 +9,7 @@ use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Validator\Constraints\File;
 use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\Regex;
 
 class ConfigType extends AbstractType
 {
@@ -36,9 +37,15 @@ class ConfigType extends AbstractType
             ->add('auth_magic', TextType::class, [
                 'label' => 'AUTH_MAGIC',
                 'required' => true,
-                //'placeholder' => '',
                 'attr' => [
                     'placeholder' => "旧サイトのAUTH_MAGICを入力してください。",
+                ],
+                'constraints' => [
+                    new NotBlank(['message' => 'AUTH_MAGICを入力してください。']),
+                    new Regex([
+                        'pattern' => '/^[a-zA-Z0-9_\-\.]+$/',
+                        'message' => 'AUTH_MAGICには英数字、アンダースコア、ハイフン、ドットのみ使用できます。',
+                    ]),
                 ],
             ])
         ;
