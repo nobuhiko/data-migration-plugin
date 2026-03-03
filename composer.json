@@ -7,7 +7,6 @@
         "ec-cube/plugin-installer": "^2.0",
         "pear/pear-core-minimal" : "^1.10.10",
         "pear/archive_tar" : "^1.4.13",
-        "wapmorgan/unified-archive": "^1.1.1",
         "nobuhiko/bulk-insert-query": "^1.1"
     },
     "extra": {

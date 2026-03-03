@@ -5,7 +5,6 @@ namespace Plugin\DataMigration43\Service;
 use Eccube\Common\EccubeConfig;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Logging\Middleware;
-use wapmorgan\UnifiedArchive\UnifiedArchive;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 class DataMigrationService
@@ -72,10 +71,8 @@ class DataMigrationService
 
     public function setMigrationVersion($em, $tmpDir, $tmpFile)
     {
-        $archive = UnifiedArchive::open($tmpDir . '/' . $tmpFile);
-        $fileNames = $archive->getFileNames();
-        // 解凍
-        $archive->extractFiles($tmpDir, $fileNames);
+        $archivePath = $tmpDir . '/' . $tmpFile;
+        $fileNames = $this->extractArchive($archivePath, $tmpDir);
 
         // 圧縮方式の間違いに対応する
         $path = pathinfo($fileNames[0]);
@@ -116,6 +113,66 @@ class DataMigrationService
     public function isVersion($version)
     {
         return $this->migrationVersion === $version;
+    }
+
+    /**
+     * アーカイブを解凍してファイル名一覧を返す
+     *
+     * tar/tar.gz は Archive_Tar、zip は ZipArchive を使用。
+     * EC-CUBE 2系バックアップの壊れた tar に対応するため PharData は使わない。
+     *
+     * @param string $archivePath アーカイブファイルのパス
+     * @param string $outputDir 解凍先ディレクトリ
+     * @return string[] 解凍されたファイル名一覧
+     */
+    public function extractArchive(string $archivePath, string $outputDir): array
+    {
+        $ext = strtolower(pathinfo($archivePath, PATHINFO_EXTENSION));
+
+        if ($ext === 'zip') {
+            return $this->extractZip($archivePath, $outputDir);
+        }
+
+        // tar / tar.gz / tgz
+        return $this->extractTar($archivePath, $outputDir);
+    }
+
+    private function extractTar(string $archivePath, string $outputDir): array
+    {
+        $tar = new \Archive_Tar($archivePath);
+        $result = $tar->extract($outputDir);
+        if ($result === false) {
+            throw new \RuntimeException('アーカイブの解凍に失敗しました: ' . basename($archivePath));
+        }
+
+        $fileNames = [];
+        foreach ($tar->listContent() as $entry) {
+            $name = $entry['filename'];
+            // ディレクトリエントリ、macリソースフォーク、空エントリを除外
+            if ($name === '' || $name === './' || substr($name, -1) === '/' || strpos(basename($name), '._') === 0) {
+                continue;
+            }
+            $fileNames[] = $name;
+        }
+
+        return $fileNames;
+    }
+
+    private function extractZip(string $archivePath, string $outputDir): array
+    {
+        $zip = new \ZipArchive();
+        if ($zip->open($archivePath) !== true) {
+            throw new \RuntimeException('ZIPファイルの読み込みに失敗しました: ' . basename($archivePath));
+        }
+
+        $zip->extractTo($outputDir);
+        $fileNames = [];
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $fileNames[] = $zip->getNameIndex($i);
+        }
+        $zip->close();
+
+        return $fileNames;
     }
 
     public function updateEnv($newMagicValue)
