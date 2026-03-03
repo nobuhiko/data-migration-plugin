@@ -120,6 +120,12 @@ class DataMigrationService
 
     public function updateEnv($newMagicValue)
     {
+        // 改行を除去し、安全な文字のみ許可（.envインジェクション対策）
+        $newMagicValue = str_replace(["\r", "\n"], '', $newMagicValue);
+        if (!preg_match('/^[a-zA-Z0-9_\-\.]+$/', $newMagicValue)) {
+            throw new \InvalidArgumentException('AUTH_MAGIC に使用できない文字が含まれています。');
+        }
+
         $projectDir = $this->params->get('kernel.project_dir');
         $envFile = $projectDir . '/.env';
 
