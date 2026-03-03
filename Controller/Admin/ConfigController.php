@@ -966,7 +966,7 @@ class ConfigController extends AbstractController
             $updateSql = implode(', ', array_map(function ($c) {
                 return '"' . $c . '" = EXCLUDED."' . $c . '"';
             }, $updateCols));
-            $sql = 'INSERT INTO ' . $tableName . ' (' . $colsSql . ') VALUES (' . $placeholders . ') ON CONFLICT (id) DO UPDATE SET ' . $updateSql;
+            $sql = 'INSERT INTO ' . $em->quoteIdentifier($tableName) . ' (' . $colsSql . ') VALUES (' . $placeholders . ') ON CONFLICT (id) DO UPDATE SET ' . $updateSql;
             $em->prepare($sql)->executeStatement(array_values($insertValues));
             $rowCount++;
         }
@@ -1397,7 +1397,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM ' . $tableName);
+        $em->exec('DELETE FROM ' . $em->quoteIdentifier($tableName));
 
         $i = 1;
         $batchSize = 20;
@@ -1436,7 +1436,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM ' . $tableName);
+        $em->exec('DELETE FROM ' . $em->quoteIdentifier($tableName));
 
         $i = 1;
         $batchSize = 20;
@@ -2037,7 +2037,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $i = $em->fetchOne('SELECT max(id) + 1  FROM ' . $tableName);
+        $i = $em->fetchOne('SELECT max(id) + 1  FROM ' . $em->quoteIdentifier($tableName));
         $batchSize = 20;
         foreach ($this->order_item as $order_id => $type) {
             foreach ($type as $key => $value) {
@@ -2296,7 +2296,7 @@ class ConfigController extends AbstractController
                         $updateSet = array_map(fn($c) => '"' . $c . '" = EXCLUDED."' . $c . '"', $updateCols);
                         $conflictCols = array_map(fn($c) => '"' . $c . '"', $primaryKeys);
 
-                        $sql = 'INSERT INTO "' . $tableName . '" (' . implode(', ', $cols) . ') ' .
+                        $sql = 'INSERT INTO ' . $em->quoteIdentifier($tableName) . ' (' . implode(', ', $cols) . ') ' .
                                'VALUES (' . implode(', ', $placeholders) . ') ' .
                                'ON CONFLICT (' . implode(', ', $conflictCols) . ') ' .
                                'DO UPDATE SET ' . implode(', ', $updateSet);
