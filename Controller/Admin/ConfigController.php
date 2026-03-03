@@ -1088,13 +1088,30 @@ class ConfigController extends AbstractController
                             $insertValues[$col] = $data[$col] ?? 'member';
                             continue;
                         }
-                        // 4.0系のカラム名マッピング
-                        if ($col === 'work' && !array_key_exists($col, $data) && array_key_exists('work_id', $data)) {
-                            $insertValues[$col] = $data['work_id'];
+                        // 2.x系カラムマッピング (member_id → id, work → work_id, authority → authority_id, rank → sort_no)
+                        if ($col === 'id' && !array_key_exists('id', $data) && array_key_exists('member_id', $data)) {
+                            $insertValues[$col] = $data['member_id'];
                             continue;
                         }
-                        if ($col === 'authority' && !array_key_exists($col, $data) && array_key_exists('authority_id', $data)) {
-                            $insertValues[$col] = $data['authority_id'];
+                        if ($col === 'work_id' && !array_key_exists('work_id', $data) && array_key_exists('work', $data)) {
+                            $insertValues[$col] = (isset($data['del_flg']) && $data['del_flg'] == 1) ? 0 : $data['work'];
+                            continue;
+                        }
+                        if ($col === 'authority_id' && !array_key_exists('authority_id', $data) && array_key_exists('authority', $data)) {
+                            $insertValues[$col] = $data['authority'];
+                            continue;
+                        }
+                        if ($col === 'sort_no' && !array_key_exists('sort_no', $data) && array_key_exists('rank', $data)) {
+                            $insertValues[$col] = $data['rank'];
+                            continue;
+                        }
+                        // del_flg == 1 の場合 email をダミーに
+                        if ($col === 'email' && isset($data['del_flg']) && $data['del_flg'] == 1) {
+                            $insertValues[$col] = StringUtil::random(60) . '@dummy.dummy';
+                            continue;
+                        }
+                        if ($col === 'creator_id') {
+                            $insertValues[$col] = !empty($data[$col]) ? $data[$col] : 1;
                             continue;
                         }
                         if (array_key_exists($col, $data)) {
@@ -1124,6 +1141,7 @@ class ConfigController extends AbstractController
                     if (array_key_exists('two_factor_auth_key', $insertValues) && $insertValues['two_factor_auth_key'] === null) {
                         $insertValues['two_factor_auth_key'] = null; // NULL許可（この行は冗長だが明示的に残す）
                     }
+                    $insertValues = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, 'dtb_member', $insertValues);
                     $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
                     $placeholders = implode(',', array_fill(0, count($insertValues), '?'));
                     $updateSql = implode(', ', array_map(fn($c) => '"' . $c . '" = EXCLUDED."' . $c . '"', $updateCols));
@@ -1131,6 +1149,7 @@ class ConfigController extends AbstractController
                     $em->prepare($sql)->executeStatement(array_values($insertValues));
                 }
                 fclose($handle);
+                $this->dataMigrationService->setIdSeq($em, 'dtb_member');
             }
             // メンバーIDキャッシュ
             try {

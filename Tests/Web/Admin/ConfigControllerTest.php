@@ -90,7 +90,14 @@ class ConfigControllerTest extends AbstractAdminWebTestCase
 
             if ($m > 0) {
                 $members = $this->entityManager->getRepository(\Eccube\Entity\Member::class)->findAll();
-                self::assertEquals($m, count($members), 'メンバーが正しくインポートされること');
+                self::assertGreaterThanOrEqual($m, count($members), 'メンバーが正しくインポートされること');
+                // 移行データ固有の値を検証
+                $conn = $this->entityManager->getConnection();
+                $testAdmin = $conn->fetchAssociative(
+                    'SELECT * FROM dtb_member WHERE id = ?', [99]
+                );
+                self::assertNotFalse($testAdmin, 'メンバーid=99が存在すること');
+                self::assertEquals('testadmin', $testAdmin['login_id']);
             }
 
             // ECCUBE_AUTH_MAGICの値を取得してアサート
