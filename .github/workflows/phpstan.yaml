@@ -72,7 +72,7 @@ jobs:
 
       - name: PHPStan
         working-directory: "ec-cube"
-        run: vendor/bin/phpstan analyse --level 5 --no-progress --error-format=github app/Plugin/${PLUGIN_CODE}/Controller app/Plugin/${PLUGIN_CODE}/Service app/Plugin/${PLUGIN_CODE}/Form
+        run: vendor/bin/phpstan analyse -c app/Plugin/${PLUGIN_CODE}/phpstan.neon.dist --level 5 --no-progress --error-format=github app/Plugin/${PLUGIN_CODE}/Controller app/Plugin/${PLUGIN_CODE}/Service app/Plugin/${PLUGIN_CODE}/Form
 
       - name: Rector (dry-run)
         working-directory: "ec-cube"

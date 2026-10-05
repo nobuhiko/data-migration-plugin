@@ -1,0 +1,7 @@
+# EC-CUBE 4.4 本体 (app/Plugin/DataMigration44 に配置した状態) の設定を継承する
+includes:
+    - ../../../phpstan.neon.dist
+
+parameters:
+    # 本体側の ignoreErrors はプラグイン単体の解析では該当しないため、未使用でもエラーにしない
+    reportUnmatchedIgnoredErrors: false
