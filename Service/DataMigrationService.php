@@ -1,69 +1,85 @@
 <?php
 
-namespace Plugin\DataMigration43\Service;
+namespace Plugin\DataMigration44\Service;
 
-use Eccube\Common\EccubeConfig;
+use nobuhiko\BulkInsertQuery\BulkInsertQuery;
+use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Logging\Middleware;
+use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
+use Doctrine\DBAL\Platforms\SQLitePlatform;
+use Doctrine\DBAL\Types\Type;
+use Eccube\Common\EccubeConfig;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 class DataMigrationService
 {
-    private $migrationVersion = '2';
-
-    private $params;
+    private string $migrationVersion = '2';
 
     /**
      * カスタマーアイテムの入力タイプをキャッシュする配列
-     * @var array
      */
-    private $customerItemTypeCache = [];
+    private array $customerItemTypeCache = [];
 
     /**
      * 選択肢オプションのテキスト値をキャッシュする配列
-     * @var array
      */
-    private $optionTextCache = [];
+    private array $optionTextCache = [];
 
     /**
      * Customer item data for migration
-     * @var array
      */
-    private $plg_customerplus_dtb_customer_item = [];
+    private array $plg_customerplus_dtb_customer_item = [];
 
     /**
      * 入力タイプをキャッシュする配列
-     * @var array
      */
-    private $inputTypeCache = [];
+    private array $inputTypeCache = [];
 
     /**
      * 選択肢オプションの結果をキャッシュする配列
-     * @var array
      */
-    private $mappingCache = [];
+    private array $mappingCache = [];
 
     /**
      * テーブルカラム情報のキャッシュ（テーブル名 => カラム配列）
-     * @var array
      */
-    private $tableColumnsCache = [];
+    private array $tableColumnsCache = [];
 
     /**
      * Customer item option data for migration
-     * @var array
      */
-    private $plg_customerplus_dtb_customer_item_option = [];
+    private array $plg_customerplus_dtb_customer_item_option = [];
 
-    private $eccubeConfig;
-
-    public function __construct(ParameterBagInterface $params, EccubeConfig $eccubeConfig)
-    {
-        $this->params = $params;
-        $this->eccubeConfig = $eccubeConfig;
+    public function __construct(
+        private readonly ParameterBagInterface $params,
+        private readonly EccubeConfig $eccubeConfig,
+    ) {
     }
 
-    public function disableLogging(Connection $em)
+    /**
+     * DBAL プラットフォーム名を返す (mysql / postgresql / sqlite / other)
+     *
+     * DBAL 4 で AbstractPlatform::getName() が削除されたため instanceof で判定する。
+     */
+    public function getPlatformName(Connection $em): string
+    {
+        $platform = $em->getDatabasePlatform();
+        if ($platform instanceof AbstractMySQLPlatform) {
+            return 'mysql';
+        }
+        if ($platform instanceof PostgreSQLPlatform) {
+            return 'postgresql';
+        }
+        if ($platform instanceof SQLitePlatform) {
+            return 'sqlite';
+        }
+
+        return 'other';
+    }
+
+    public function disableLogging(Connection $em): void
     {
         $configuration = $em->getConfiguration();
         $middlewares = $configuration->getMiddlewares();
@@ -155,7 +171,7 @@ class DataMigrationService
         foreach ($tar->listContent() as $entry) {
             $name = $entry['filename'];
             // ディレクトリエントリ、macリソースフォーク、空エントリを除外
-            if ($name === '' || $name === './' || substr($name, -1) === '/' || strpos(basename($name), '._') === 0) {
+            if ($name === '' || $name === './' || str_ends_with($name, '/') || str_starts_with(basename($name), '._')) {
                 continue;
             }
             $fileNames[] = $name;
@@ -197,7 +213,7 @@ class DataMigrationService
         }
 
         $env = file_get_contents($envFile);
-        if (strpos($env, 'ECCUBE_AUTH_MAGIC=') !== false) {
+        if (str_contains($env, 'ECCUBE_AUTH_MAGIC=')) {
             $env = preg_replace('/ECCUBE_AUTH_MAGIC=.*/', 'ECCUBE_AUTH_MAGIC=' . $newMagicValue, $env);
         } else {
             $env .= "\nECCUBE_AUTH_MAGIC=" . $newMagicValue;
@@ -219,7 +235,7 @@ class DataMigrationService
     {
         $this->validateTableName($tableName);
         $quoted = $em->quoteIdentifier($tableName);
-        $em->exec('DELETE FROM ' . $quoted);
+        $em->executeStatement('DELETE FROM ' . $quoted);
     }
 
     public function convertNULL($data)
@@ -243,15 +259,13 @@ class DataMigrationService
     public function convertDataTypesForPostgreSQL($em, $tableName, $data)
     {
         // PostgreSQL以外は処理しない
-        if ($em->getDatabasePlatform()->getName() !== 'postgresql') {
+        if (!$em->getDatabasePlatform() instanceof PostgreSQLPlatform) {
             return $data;
         }
 
 
         try {
-            if (!isset($this->tableColumnsCache[$tableName])) {
-                $this->tableColumnsCache[$tableName] = $em->getSchemaManager()->listTableColumns($tableName);
-            }
+            $this->tableColumnsCache[$tableName] ??= $em->createSchemaManager()->listTableColumns($tableName);
             $columns = $this->tableColumnsCache[$tableName];
             $hasConversion = false;
 
@@ -260,7 +274,7 @@ class DataMigrationService
                 if ($value === '' || $value === false) {
                     if (isset($columns[$key])) {
                         $column = $columns[$key];
-                        $type = $column->getType()->getName();
+                        $type = Type::lookupName($column->getType());
 
                         // 数値型の場合、空文字またはfalseをNULLに変換
                         if (in_array($type, ['integer', 'bigint', 'smallint', 'decimal', 'float', 'numeric'])) {
@@ -281,6 +295,119 @@ class DataMigrationService
         }
 
         return $data;
+    }
+
+    /**
+     * NOT NULL かつ DB 側にデフォルト値を持つ列へ null を渡そうとしている場合、デフォルト値で埋める.
+     * 旧バージョンのバックアップに存在しない列 (4.4 で追加された dtb_product.refund_allowed など) への対応.
+     * あわせて値の並び順をテーブルのカラム順に揃える.
+     */
+    public function fillNotNullDefaults(Connection $em, ?string $tableName, array $row): array
+    {
+        if ($tableName === null) {
+            return $row;
+        }
+        try {
+            $this->tableColumnsCache[$tableName] ??= $em->createSchemaManager()->listTableColumns($tableName);
+        } catch (\Exception) {
+            return $row;
+        }
+        foreach ($this->tableColumnsCache[$tableName] as $column) {
+            $name = $column->getName();
+            if (!$column->getNotnull() || !array_key_exists($name, $row) || $row[$name] !== null) {
+                continue;
+            }
+            $default = $column->getDefault();
+            if ($default === null) {
+                continue;
+            }
+            if (Type::lookupName($column->getType()) === 'boolean') {
+                $row[$name] = in_array(strtolower((string) $default), ['true', 't', '1'], true) ? 1 : 0;
+            } else {
+                $row[$name] = $default;
+            }
+        }
+
+        // BulkInsertQuery は値の並び順で INSERT するため、カラム定義 (listTableColumns) の順に並べ直す
+        $ordered = [];
+        foreach ($this->tableColumnsCache[$tableName] as $column) {
+            $name = $column->getName();
+            if (array_key_exists($name, $row)) {
+                $ordered[$name] = $row[$name];
+            }
+        }
+        foreach ($row as $name => $value) {
+            if (!array_key_exists($name, $ordered)) {
+                $ordered[$name] = $value;
+            }
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * 4.4 で追加された dtb_product_class.in_stock を在庫数と在庫無制限フラグから再計算する.
+     * 移行は生 SQL で行うため、本体の ProductClassInStockSubscriber は動かない.
+     */
+    public function recalcInStock(Connection $em): void
+    {
+        try {
+            $columns = $em->createSchemaManager()->listTableColumns('dtb_product_class');
+        } catch (\Exception) {
+            return;
+        }
+        if (!isset($columns['in_stock'])) {
+            return;
+        }
+        $em->executeStatement(
+            'UPDATE dtb_product_class pc SET in_stock = CASE WHEN pc.stock_unlimited = true'
+            . ' OR EXISTS (SELECT 1 FROM dtb_product_stock ps WHERE ps.product_class_id = pc.id AND ps.stock > 0)'
+            . ' THEN true ELSE false END'
+        );
+    }
+
+    /**
+     * $table を外部キーで参照しているテーブルを再帰的に集める (PostgreSQL 用).
+     *
+     * @return string[]
+     */
+    private function getReferencingTablesRecursive(Connection $em, string $table, array &$seen = []): array
+    {
+        $children = $em->fetchFirstColumn(
+            'SELECT DISTINCT conrelid::regclass::text FROM pg_constraint WHERE contype = ? AND confrelid = ?::regclass AND conrelid <> confrelid',
+            ['f', $table]
+        );
+        $result = [];
+        foreach ($children as $child) {
+            $child = trim((string) $child, '"');
+            if (isset($seen[$child])) {
+                continue;
+            }
+            $seen[$child] = true;
+            $result[] = $child;
+            $result = array_merge($result, $this->getReferencingTablesRecursive($em, $child, $seen));
+        }
+
+        return $result;
+    }
+
+    /**
+     * 保護対象テーブルを巻き込まずに $table を空にする. 参照元の子テーブルを先に DELETE してから自身を DELETE する.
+     */
+    private function deleteWithChildren(Connection $em, string $table, array $protected, array &$done): void
+    {
+        if (isset($done[$table]) || in_array($table, $protected, true)) {
+            return;
+        }
+        $done[$table] = true;
+        $children = $em->fetchFirstColumn(
+            'SELECT DISTINCT conrelid::regclass::text FROM pg_constraint WHERE contype = ? AND confrelid = ?::regclass AND conrelid <> confrelid',
+            ['f', $table]
+        );
+        foreach ($children as $child) {
+            $this->deleteWithChildren($em, trim((string) $child, '"'), $protected, $done);
+        }
+        $em->executeStatement('DELETE FROM ' . $em->quoteIdentifier($table));
     }
 
     public function checkUploadSize()
@@ -321,21 +448,21 @@ class DataMigrationService
                     ) AS t
             )';
 
-        $em->exec($sql);
+        $em->executeStatement($sql);
 
         // リレーションエラーになるので
-        $em->exec('DELETE FROM dtb_cart');
-        $em->exec('DELETE FROM dtb_cart_item');
+        $em->executeStatement('DELETE FROM dtb_cart');
+        $em->executeStatement('DELETE FROM dtb_cart_item');
 
         // 外部キー制約エラーになるデータを消す
-        $em->exec('DELETE FROM dtb_class_category WHERE id = 0');
-        $em->exec('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
-        $em->exec('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
+        $em->executeStatement('DELETE FROM dtb_class_category WHERE id = 0');
+        $em->executeStatement('UPDATE dtb_product_class SET class_category_id1 = NULL WHERE class_category_id1 not in (select id from dtb_class_category)');
+        $em->executeStatement('UPDATE dtb_product_class SET class_category_id2 = NULL WHERE class_category_id2 not in (select id from dtb_class_category)');
 
-        $em->exec('delete from dtb_product_tag where id in (
+        $em->executeStatement('delete from dtb_product_tag where id in (
                         select id from (select t1.id from dtb_product_tag t1 left join dtb_tag t2 on t1.tag_id = t2.id where t2.id is null) as tmp
                     );');
-        $em->exec('delete from dtb_product_tag where id in (
+        $em->executeStatement('delete from dtb_product_tag where id in (
                         select id from (select t1.id from dtb_product_tag t1 left join dtb_product t2 on t1.product_id = t2.id where t2.id is null) as tmp
                     );');
     }
@@ -343,49 +470,57 @@ class DataMigrationService
     public function begin($em, $context = NULL)
     {
         $em->beginTransaction();
-        $platform = $em->getDatabasePlatform()->getName();
+        $platform = $this->getPlatformName($em);
 
         if ($platform == 'mysql') {
-            $em->exec('SET FOREIGN_KEY_CHECKS = 0;');
-            $em->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
+            $em->executeStatement('SET FOREIGN_KEY_CHECKS = 0;');
+            $em->executeStatement("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'"); // STRICT_TRANS_TABLESを無効にする。
         } elseif ($platform == 'postgresql') {
             // PostgreSQLでは外部キー制約チェックをトランザクション終了時まで遅延
             // fix4x()ではUPSERTを使うため不要だが、他の処理（saveToC等）のために残す
-            $em->exec('SET CONSTRAINTS ALL DEFERRED;');
+            $em->executeStatement('SET CONSTRAINTS ALL DEFERRED;');
         }
 
         if ($platform != 'mysql') {
             try {
-                switch ($context) {
-                    case "Customer":
-                        $targetTables = ['dtb_customer', 'dtb_customer_address'];
-                        break;
-                    case "Product":
-                        $targetTables = ['dtb_product', 'dtb_product_class', 'dtb_product_image', 'dtb_product_category', 'dtb_class_category'];
-                        break;
-                    case "Order":
-                        $targetTables = ['dtb_order', 'dtb_order_detail', 'dtb_delivery', 'dtb_mail_history', 'dtb_payment'];
-                        break;
-                    case "CustomerAndOrder":
-                        $targetTables = ['dtb_customer', 'dtb_customer_address', 'dtb_order', 'dtb_order_detail', 'dtb_mail_history'];
-                        break;
-                    default:
-                        $targetTables = [];
-                        break;
-                }
+                $targetTables = match ($context) {
+                    "Customer" => ['dtb_customer', 'dtb_customer_address'],
+                    "Product" => ['dtb_product', 'dtb_product_class', 'dtb_product_image', 'dtb_product_category', 'dtb_class_category'],
+                    "Order" => ['dtb_order', 'dtb_order_detail', 'dtb_delivery', 'dtb_mail_history', 'dtb_payment'],
+                    "CustomerAndOrder" => ['dtb_customer', 'dtb_customer_address', 'dtb_order', 'dtb_order_detail', 'dtb_mail_history'],
+                    default => [],
+                };
 
                 $existing = [];
                 foreach ($targetTables as $t) {
                     $exists = $em->fetchOne("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=?", [$t]);
                     if ($exists) {
-                        $existing[] = $em->quoteIdentifier($t);
+                        $existing[] = $t;
                     }
                 }
-                if ($existing) {
+
+                // 4.4 では dtb_customer が dtb_payment / dtb_delivery を参照する (preferred_payment_id 等) ため、
+                // TRUNCATE ... CASCADE をそのまま使うと会員まで消えてしまう。
+                // CASCADE で保護対象テーブルに到達するものは、参照元を子から順に DELETE する (ON DELETE SET NULL が効く)。
+                $protected = array_diff(['dtb_customer', 'dtb_member', 'dtb_product', 'dtb_product_class', 'dtb_category'], $existing);
+                $truncate = [];
+                $deleteCascade = [];
+                foreach ($existing as $t) {
+                    if (array_intersect($this->getReferencingTablesRecursive($em, $t), $protected)) {
+                        $deleteCascade[] = $t;
+                    } else {
+                        $truncate[] = $em->quoteIdentifier($t);
+                    }
+                }
+                if ($truncate) {
                     // PostgreSQL TRUNCATE 構文: TRUNCATE TABLE ... [ RESTART IDENTITY | CONTINUE IDENTITY ] [ CASCADE | RESTRICT ]
                     // 順序は RESTART IDENTITY が先、その後に CASCADE
-                    $sql = 'TRUNCATE TABLE ' . implode(', ', $existing) . ' RESTART IDENTITY CASCADE;';
-                    $em->exec($sql);
+                    $sql = 'TRUNCATE TABLE ' . implode(', ', $truncate) . ' RESTART IDENTITY CASCADE;';
+                    $em->executeStatement($sql);
+                }
+                $done = [];
+                foreach ($deleteCascade as $t) {
+                    $this->deleteWithChildren($em, $t, $protected, $done);
                 }
             } catch (\Exception $e) {
                 error_log('Warning: TRUNCATE CASCADE (dtb_customer, dtb_member) failed: ' . $e->getMessage());
@@ -457,11 +592,16 @@ class DataMigrationService
                             break;
 
                         case 'dtb_other_deliv':
+
+                        case 'dtb_member':
+                        case 'mtb_authority':
+                        case 'mtb_sex':
+                        case 'mtb_job':
+                        case 'mtb_product_type':
                             //$tableName = 'dtb_customer_address';
                             $tableName = $row[0];
                             $allow_zero = true;
                             $tbl_flg = true;
-
                             $fpcsv = fopen($tmpDir . $tableName . '.csv', 'w');
                             break;
                         case 'dtb_index_list': // ゴミデータが交じるので
@@ -469,24 +609,11 @@ class DataMigrationService
                             $tableName = $row[0];
                             $fpcsv = fopen($tmpDir . $tableName . '.csv', 'w');
                             break;
-
-                        case 'dtb_member':
-                        case 'mtb_authority':
-                        case 'mtb_sex':
-                        case 'mtb_job':
-                        case 'mtb_product_type':
-                            $tableName = $row[0];
-                            $allow_zero = true;
-                            $tbl_flg = true;
-                            $fpcsv = fopen($tmpDir . $tableName . '.csv', 'w');
-                            break;
                     }
                     continue;
                 }
 
-                if ($tbl_flg) {
-                    fputcsv($fpcsv, $row);
-                }
+                fputcsv($fpcsv, $row);
             } // end while
             fclose($fpcsv);
             fclose($handle);
@@ -496,7 +623,7 @@ class DataMigrationService
     /**
      * 指定したプラグインコードがインストール済みかどうかを返す
      *
-     * @param \Doctrine\DBAL\Connection|\Doctrine\ORM\EntityManagerInterface $em
+     * @param Connection|EntityManagerInterface $em
      * @param string $code
      * @return bool
      */
@@ -519,7 +646,7 @@ class DataMigrationService
     {
 
         // 入力タイプをキャッシュから取得する
-        $input_type = isset($this->inputTypeCache[$customer_item_id]) ? $this->inputTypeCache[$customer_item_id] : null;
+        $input_type = $this->inputTypeCache[$customer_item_id] ?? null;
 
         $result = [
             'value' => null,
@@ -529,7 +656,7 @@ class DataMigrationService
 
         // 電話番号タイプの場合は特別な処理
         if ($input_type == 2) { // TEL_TYPE
-            if (isset($dataRow['value']) && $dataRow['value'] !== null && $dataRow['value'] !== '') {
+            if (isset($dataRow['value']) && $dataRow['value'] !== '') {
                 // 電話番号は value にカンマ区切りで部品が保存されている場合がある
                 $result['value'] = str_replace(',', '', $dataRow['value']);
                 return [$result];
@@ -538,7 +665,7 @@ class DataMigrationService
 
         // 選択肢タイプの場合
         else if ($input_type >= 10 && $input_type < 100) { // SELECT_TYPE, RADIO_TYPE, CHECKBOX_TYPE
-            if (isset($dataRow['value']) && $dataRow['value'] !== null && $dataRow['value'] !== '') {
+            if (isset($dataRow['value']) && $dataRow['value'] !== '') {
                 $values = explode(',', $dataRow['value']);
                 foreach ($values as $v) {
                     $optionValue = trim($v);
@@ -547,13 +674,13 @@ class DataMigrationService
                 return $res;
             }
         } else if ($input_type == 4) {
-            if (isset($dataRow['value']) && $dataRow['value'] !== null && $dataRow['value'] !== '') {
+            if (isset($dataRow['value']) && $dataRow['value'] !== '') {
                 $result['date_value'] = self::convertTz($dataRow['value'], $em);
             }
         }
 
         // 通常のデータ処理
-        if (isset($dataRow['value']) && $dataRow['value'] !== null && $dataRow['value'] !== '') {
+        if (isset($dataRow['value']) && $dataRow['value'] !== '') {
             //$values = @json_decode($dataRow['value'], true);
             $result['value'] = $dataRow['value'];
         } else {
@@ -570,7 +697,6 @@ class DataMigrationService
      * @param array $values 値の配列
      * @param int $customer_data_id 顧客データID
      * @param int &$detailId 詳細ID参照
-     * @param string $csvDir CSVファイルのディレクトリ
      */
     private function addDetailCsvRows($detailFp, $values, $customer_data_id, &$detailId)
     {
@@ -638,7 +764,7 @@ class DataMigrationService
         // 全テーブルのデータを削除
         $allTables = array_merge($importOrder, ['plg_customerplus_dtb_customer']);
         foreach ($allTables as $tableName) {
-            if ($em->getSchemaManager()->tablesExist([$tableName])) {
+            if ($em->createSchemaManager()->tablesExist([$tableName])) {
                 $this->resetTable($em, $tableName);
             }
         }
@@ -686,7 +812,7 @@ class DataMigrationService
         $valueToDataIdMap = [];
 
         if (file_exists($customerCsv) && filesize($customerCsv) > 0) {
-            $this->processCustomerCsv($em, $customerCsv, $dataFp, $detailFp, $dataId, $detailId, $valueToDataIdMap, $csvDir);
+            $this->processCustomerCsv($em, $customerCsv, $dataFp, $detailFp, $dataId, $detailId, $valueToDataIdMap);
         }
 
         fclose($dataFp);
@@ -716,7 +842,7 @@ class DataMigrationService
         }
 
         if ($platform == 'mysql') {
-            $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+            $em->executeStatement('SET FOREIGN_KEY_CHECKS = 1;');
         } else {
             foreach ($importOrder as $tableName) {
                 $this->setIdSeq($em, $tableName);
@@ -734,22 +860,21 @@ class DataMigrationService
      * @param int &$dataId データID参照
      * @param int &$detailId 詳細ID参照
      * @param array &$valueToDataIdMap 値とデータIDのマッピング
-     * @param string $csvDir CSVファイルのディレクトリ
      */
-    private function processCustomerCsv($em, $customerCsv, $dataFp, $detailFp, &$dataId, &$detailId, &$valueToDataIdMap, $csvDir)
+    private function processCustomerCsv($em, $customerCsv, $dataFp, $detailFp, &$dataId, &$detailId, &$valueToDataIdMap)
     {
         if (($handle = fopen($customerCsv, 'r')) !== false) {
             $key = fgetcsv($handle);
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             while (($row = fgetcsv($handle)) !== false) {
                 $dataRow = $this->convertNULL(array_combine($key, $row));
 
                 // valueカラムが配列やJSONの場合を想定
-                $customer_item_id = isset($dataRow['customer_item_id']) ? $dataRow['customer_item_id'] : null;
+                $customer_item_id = $dataRow['customer_item_id'] ?? null;
                 $values = $this->parseValueData($dataRow, $customer_item_id, $em);
 
-                $customer_id = isset($dataRow['customer_id']) ? $dataRow['customer_id'] : null;
-                $create_date = isset($dataRow['create_date']) ? $dataRow['create_date'] : date('Y-m-d H:i:s');
+                $customer_id = $dataRow['customer_id'] ?? null;
+                $create_date = $dataRow['create_date'] ?? date('Y-m-d H:i:s');
 
                 // customer_data_idを採番
                 $customer_data_id = $dataId;
@@ -813,18 +938,18 @@ class DataMigrationService
             return;
         }
 
-        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $columns = $em->createSchemaManager()->listTableColumns($tableName);
         $listTableColumns = [];
         foreach ($columns as $column) {
             $listTableColumns[] = $column->getName();
         }
 
-        $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
+        $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
         if (($handle = fopen($csvFile, 'r')) !== false) {
             $key = fgetcsv($handle);
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             $i = 1;
             $batchSize = 20;
 
@@ -832,7 +957,7 @@ class DataMigrationService
                 $data = $this->convertNULL(array_combine($key, $row));
                 $value = $this->processRowData($tableName, $data, $listTableColumns, $valueToDataIdMap, $controller, $em);
 
-                $builder->setValues($value);
+                $builder->setValues($this->fillNotNullDefaults($em, $tableName, $value));
 
                 if (($i % $batchSize) === 0) {
                     $builder->execute();
@@ -875,7 +1000,7 @@ class DataMigrationService
                         // customer_data_idへの変換
                         $value[$column] = $valueToDataIdMap[$result['customer_id'] . '_' . $data['customer_item_id']] ?? null;
                     } else {
-                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                        $value[$column] = $data[$column] ?? null;
                     }
                 }
                 break;
@@ -890,7 +1015,7 @@ class DataMigrationService
                         // customer_data_idへの変換
                         $value[$column] = $valueToDataIdMap[$result['customer_id'] . '_' . $data['customer_item_id']] ?? null;
                     } else {
-                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                        $value[$column] = $data[$column] ?? null;
                     }
                 }
 
@@ -902,7 +1027,7 @@ class DataMigrationService
                         // customer_data_idへの変換
                         $value[$column] = $valueToDataIdMap[$data['customer_id'] . '_' . $data['customer_item_id']] ?? null;
                     } else {
-                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                        $value[$column] = $data[$column] ?? null;
                     }
                 }
 
@@ -917,7 +1042,7 @@ class DataMigrationService
                     } elseif ($column === 'discriminator_type') {
                         $value[$column] = "customercustom";
                     } else {
-                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                        $value[$column] = $data[$column] ?? null;
                     }
                 }
                 break;
@@ -945,18 +1070,18 @@ class DataMigrationService
             return;
         }
 
-        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $columns = $em->createSchemaManager()->listTableColumns($tableName);
         $listTableColumns = [];
         foreach ($columns as $column) {
             $listTableColumns[] = $column->getName();
         }
 
-        $builder = new \nobuhiko\BulkInsertQuery\BulkInsertQuery($em, $tableName);
+        $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
         if (($handle = fopen($csvFile, 'r')) !== false) {
             $key = fgetcsv($handle);
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             $i = 1;
             $batchSize = 20;
 
@@ -974,7 +1099,7 @@ class DataMigrationService
                     case 'dtb_product_class':
                         // 存在しないカテゴリIDは NULL に変更 (外部キー違反防止)
                         foreach (['class_category_id1', 'class_category_id2'] as $catCol) {
-                            if (isset($data[$catCol]) && $data[$catCol] !== null && $data[$catCol] !== '') {
+                            if (isset($data[$catCol]) && $data[$catCol] !== '') {
                                 $catId = (int)$data[$catCol];
                                 if ($catId === 0) {
                                     $data[$catCol] = null;
@@ -995,7 +1120,7 @@ class DataMigrationService
                 }
                 $value = $this->processCustomerItemData($tableName, $data, $listTableColumns, $i);
 
-                $builder->setValues($value);
+                $builder->setValues($this->fillNotNullDefaults($em, $tableName, $value));
 
                 if (($i % $batchSize) === 0) {
                     $builder->execute();
@@ -1047,7 +1172,7 @@ class DataMigrationService
                     } elseif ($column === 'discriminator_type') {
                         $value[$column] = 'customeritem';
                     } else {
-                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                        $value[$column] = $data[$column] ?? null;
                     }
                 }
                 break;
@@ -1065,14 +1190,14 @@ class DataMigrationService
                     } elseif ($column === 'discriminator_type') {
                         $value[$column] = 'customeritemoption';
                     } else {
-                        $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                        $value[$column] = $data[$column] ?? null;
                     }
                 }
                 break;
 
             default:
                 foreach ($listTableColumns as $column) {
-                    $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                    $value[$column] = $data[$column] ?? null;
                 }
                 if (in_array('discriminator_type', $listTableColumns) && !isset($value['discriminator_type'])) {
                     $value['discriminator_type'] = str_replace('plg_customerplus_dtb_', '', $tableName);
@@ -1091,26 +1216,25 @@ class DataMigrationService
     private function convertInputType($inputType)
     {
         // 旧データのinput_typeを新プラグインの仕様に合わせて変換
-        switch ($inputType) {
-            case 1: // テキストボックス
-                return 1;
-            case 2: // 電話
-                return 3;
-            case 3: // 郵便
-                return '';
-            case 4: // 日付
-                return 4;
-            case 5: // テキストエリア
-                return 2;
-            case 10: // ラジオボタン
-                return 11;
-            case 11: // セレクトボックス
-                return 10;
-            case 12: // チェックボックス
-                return 12; // 'checkbox' から数値に修正
-            default:
-                return $inputType; // デフォルトはtext
-        }
+        return match ($inputType) {
+            // テキストボックス
+            1 => 1,
+            // 電話
+            2 => 3,
+            // 郵便
+            3 => '',
+            // 日付
+            4 => 4,
+            // テキストエリア
+            5 => 2,
+            // ラジオボタン
+            10 => 11,
+            // セレクトボックス
+            11 => 10,
+            // チェックボックス
+            12 => 12,
+            default => $inputType,
+        };
     }
 
 

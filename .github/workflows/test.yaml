@@ -1,49 +1,28 @@
-name: CI/CD for EC-CUBE4 Plugin
-on: [workflow_dispatch, pull_request]
+name: CI for DataMigration44
+on: [workflow_dispatch, push, pull_request]
 jobs:
   run-on-linux:
     name: Run on Linux
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        eccube_version: ["4.2", "4.3"]
-        php: ["7.4", "8.0", "8.1", "8.2", "8.3"]
-        db: ["mysql", "mysql8", "pgsql"]
-        plugin_code: ["DataMigration43"]
+        eccube_version: ["4.4"]
+        php: ["8.2", "8.3", "8.4", "8.5"]
+        db: ["mysql8", "pgsql"]
+        plugin_code: ["DataMigration44"]
         include:
-          - db: mysql
-            database_url: mysql://root:password@127.0.0.1:3306/eccube_db
-            database_server_version: 5.7
-            database_charset: utf8mb4
           - db: mysql8
             database_url: mysql://root:password@127.0.0.1:3308/eccube_db
-            database_server_version: 8
+            database_server_version: 8.4
             database_charset: utf8mb4
           - db: pgsql
             database_url: postgres://postgres:password@127.0.0.1:5432/eccube_db
-            database_server_version: 14
+            database_server_version: 16
             database_charset: utf8
-        exclude:
-          - eccube_version: 4.2
-            php: 8.2
-          - eccube_version: 4.2
-            php: 8.3
-          - eccube_version: 4.3
-            php: 7.4
-          - eccube_version: 4.3
-            php: 8.0
     services:
-      mysql:
-        image: mysql:5.7
-        env:
-          MYSQL_ROOT_PASSWORD: password
-          MYSQL_DATABASE: ${{ matrix.dbname }}
-        ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
       mysql8:
-        image: mysql:8
+        image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: password
           MYSQL_DATABASE: ${{ matrix.dbname }}
@@ -51,7 +30,7 @@ jobs:
           - 3308:3306
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
       postgres:
-        image: postgres:14
+        image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
@@ -67,57 +46,54 @@ jobs:
           - 1025:1025
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup PHP
-        uses: nanasess/setup-php@v4
+        uses: nanasess/setup-php@master
         with:
           php-version: ${{ matrix.php }}
 
-      - name: Checkout ECCUBE2Downloads
-        uses: actions/checkout@v3
+      - name: Checkout ECCUBE2Downloads44
+        uses: actions/checkout@v4
         with:
           repository: "nobuhiko/ECCUBE2Downloads"
-          ref: "main"
-          path: "ECCUBE2Downloads"
+          ref: "4.4"
+          path: "ECCUBE2Downloads44"
 
-      - name: Archive Plugin
+      - name: Archive Plugins
         env:
           PLUGIN_CODE: ${{ matrix.plugin_code }}
         run: |
-          tar cvzf ${GITHUB_WORKSPACE}/${PLUGIN_CODE}.tar.gz --exclude=./ECCUBE2Downloads ./*
-          cd ${GITHUB_WORKSPACE}/ECCUBE2Downloads && tar cvzf ${GITHUB_WORKSPACE}/ECCUBE2Downloads.tar.gz ./*
-
-      - name: Setup mock-package-api
-        env:
-          PLUGIN_CODE: ${{ matrix.plugin_code }}
-        run: |
-          mkdir -p /tmp/repos
-          cp ${GITHUB_WORKSPACE}/${PLUGIN_CODE}.tar.gz /tmp/repos/${PLUGIN_CODE}.tgz
-          cp ${GITHUB_WORKSPACE}/ECCUBE2Downloads.tar.gz /tmp/repos/ECCUBE2Downloads.tgz
-            docker run --name package-api -d -v /tmp/repos:/repos -e MOCK_REPO_DIR=/repos -p 8080:8080 eccube/mock-package-api:composer2
+          tar cvzf ${GITHUB_WORKSPACE}/${PLUGIN_CODE}.tar.gz --exclude=./ECCUBE2Downloads44 ./*
+          cd ${GITHUB_WORKSPACE}/ECCUBE2Downloads44 && tar cvzf ${GITHUB_WORKSPACE}/ECCUBE2Downloads44.tar.gz ./*
 
       - name: Checkout EC-CUBE
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: "EC-CUBE/ec-cube"
           ref: ${{ matrix.eccube_version }}
           path: "ec-cube"
 
       - name: Get Composer Cache Directory
+        id: composer-cache
         run: |
-          echo "COMPOSER_CACHE_DIR=$(composer config cache-files-dir)" >> $GITHUB_ENV
+          echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
-          path: ${{ env.COMPOSER_CACHE_DIR }}
+          path: ${{ steps.composer-cache.outputs.dir }}
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
           restore-keys: |
             ${{ runner.os }}-composer-
 
       - name: Install to composer
         working-directory: "ec-cube"
-        run: composer install --no-interaction -o --apcu-autoloader
+        # Symfony 7.4 の symfony/cache が ext-redis <6.1 と衝突するが、ランナーには
+        # 古い php-redis が入っている。本プラグインは redis 未使用のため無視する。
+        run: |
+          composer install --no-interaction -o --apcu-autoloader --ignore-platform-req=ext-redis
+          composer require --no-interaction --ignore-platform-req=ext-redis \
+            pear/pear-core-minimal:^1.10.10 pear/archive_tar:^1.4.13 nobuhiko/bulk-insert-query:^1.2
 
       - name: Setup EC-CUBE
         env:
@@ -131,6 +107,7 @@ jobs:
           bin/console doctrine:database:create
           bin/console doctrine:schema:create
           bin/console eccube:fixtures:load
+
       - name: Setup Plugin
         env:
           APP_ENV: "test"
@@ -139,17 +116,14 @@ jobs:
           DATABASE_SERVER_VERSION: ${{ matrix.database_server_version }}
           DATABASE_CHARSET: ${{ matrix.database_charset }}
           PLUGIN_CODE: ${{ matrix.plugin_code }}
-          ECCUBE_PACKAGE_API_URL: "http://127.0.0.1:8080"
-          USE_SELFSIGNED_SSL_CERTIFICATE: "1"
         working-directory: "ec-cube"
         run: |
-          bin/console doctrine:query:sql "update dtb_base_info set authentication_key='dummy'"
-          bin/console eccube:composer:require ec-cube/eccube2downloads
-          bin/console cache:clear --no-warmup
-          bin/console eccube:plugin:enable --code=ECCUBE2Downloads
-          bin/console eccube:composer:require ec-cube/datamigration43
-          bin/console cache:clear --no-warmup
+          bin/console eccube:plugin:install --code=ECCUBE2Downloads44 --path=${GITHUB_WORKSPACE}/ECCUBE2Downloads44.tar.gz
+          bin/console eccube:plugin:enable --code=ECCUBE2Downloads44
+          bin/console eccube:plugin:install --code=${PLUGIN_CODE} --path=${GITHUB_WORKSPACE}/${PLUGIN_CODE}.tar.gz
           bin/console eccube:plugin:enable --code=${PLUGIN_CODE}
+          bin/console cache:clear --no-warmup
+
       - name: Run PHPUnit Plugin
         env:
           APP_ENV: "test"
@@ -160,7 +134,10 @@ jobs:
           PLUGIN_CODE: ${{ matrix.plugin_code }}
         working-directory: "ec-cube"
         run: |
-          rm -rf var/cache
+          # 有効化したプラグインのルーティングはコンテナのコンパイル時に確定するため、
+          # クリーンなプロセスで warmup してから phpunit を実行する。
+          bin/console cache:clear --no-warmup
+          bin/console cache:warmup
           ./vendor/bin/phpunit app/Plugin/${PLUGIN_CODE}/Tests
 
       - name: Disable Plugin

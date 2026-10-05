@@ -1,6 +1,6 @@
-# データ移行プラグイン for EC-CUBE4
+# データ移行プラグイン for EC-CUBE 4.4
 
-EC-CUBE 2.x / 3.x / 4.0 / 4.1 のバックアップデータを利用して、EC-CUBE 4.3 系へデータ移行を行うプラグインです。
+EC-CUBE 2.x / 3.x / 4.0 / 4.1 のバックアップデータを利用して、EC-CUBE 4.4 系へデータ移行を行うプラグインです。
 
 - https://www.ec-cube.net/products/detail.php?product_id=2091
 - https://www.ec-cube.net/products/detail.php?product_id=2479
@@ -70,7 +70,7 @@ ECCUBE2Downloads がインストールされていない場合、ダウンロー
 
 ### 4.0 / 4.1 からの移行
 
-4.0 / 4.1 から 4.3 への移行は**すべてのデータ**を移行します。
+4.0 / 4.1 から 4.4 への移行は**すべてのデータ**を移行します。
 
 ## License
 

@@ -1,15 +1,15 @@
 {
-    "name": "ec-cube/datamigration43",
+    "name": "ec-cube/datamigration44",
     "version": "4.4.0",
-    "description": "データ移行プラグイン",
+    "description": "データ移行プラグイン for EC-CUBE 4.4",
     "type": "eccube-plugin",
     "require": {
         "ec-cube/plugin-installer": "^2.0",
         "pear/pear-core-minimal" : "^1.10.10",
         "pear/archive_tar" : "^1.4.13",
-        "nobuhiko/bulk-insert-query": "^1.1"
+        "nobuhiko/bulk-insert-query": "^1.2"
     },
     "extra": {
-        "code": "DataMigration43"
+        "code": "DataMigration44"
     }
 }

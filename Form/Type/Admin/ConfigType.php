@@ -1,6 +1,6 @@
 <?php
 
-namespace Plugin\DataMigration43\Form\Type\Admin;
+namespace Plugin\DataMigration44\Form\Type\Admin;
 
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
@@ -16,7 +16,7 @@ class ConfigType extends AbstractType
     /**
      * {@inheritdoc}
      */
-    public function buildForm(FormBuilderInterface $builder, array $options)
+    public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         $builder
             ->add('import_file', FileType::class, [
@@ -24,11 +24,11 @@ class ConfigType extends AbstractType
                 'mapped' => false,
                 'required' => true,
                 'constraints' => [
-                    new NotBlank(['message' => 'ファイルを選択してください。']),
-                    new File([
-                        'mimeTypes' => ['application/zip', 'application/x-tar', 'application/x-gzip', 'application/gzip'],
-                        'mimeTypesMessage' => 'zipファイル、tarファイル、tar.gzファイルのいずれかをアップロードしてください。',
-                    ]),
+                    new NotBlank(message: 'ファイルを選択してください。'),
+                    new File(
+                        mimeTypes: ['application/zip', 'application/x-tar', 'application/x-gzip', 'application/gzip'],
+                        mimeTypesMessage: 'zipファイル、tarファイル、tar.gzファイルのいずれかをアップロードしてください。',
+                    ),
                 ],
             ])->add('customer_order_only', CheckboxType::class, [
                 'label' => '会員と受注データのみ移行する(一度データ移行を実施している必要があります)',
@@ -41,11 +41,11 @@ class ConfigType extends AbstractType
                     'placeholder' => "旧サイトのAUTH_MAGICを入力してください。",
                 ],
                 'constraints' => [
-                    new NotBlank(['message' => 'AUTH_MAGICを入力してください。']),
-                    new Regex([
-                        'pattern' => '/^[a-zA-Z0-9_\-\.]+$/',
-                        'message' => 'AUTH_MAGICには英数字、アンダースコア、ハイフン、ドットのみ使用できます。',
-                    ]),
+                    new NotBlank(message: 'AUTH_MAGICを入力してください。'),
+                    new Regex(
+                        pattern: '/^[a-zA-Z0-9_\-\.]+$/',
+                        message: 'AUTH_MAGICには英数字、アンダースコア、ハイフン、ドットのみ使用できます。',
+                    ),
                 ],
             ])
         ;

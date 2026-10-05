@@ -1,21 +1,21 @@
 <?php
 
-namespace Plugin\DataMigration43\Tests\Service;
+declare(strict_types=1);
+
+namespace Plugin\DataMigration44\Tests\Service;
 
 use Eccube\Tests\EccubeTestCase;
-use Plugin\DataMigration43\Service\DataMigrationService;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Plugin\DataMigration44\Service\DataMigrationService;
 use Symfony\Component\Filesystem\Filesystem;
 
-class ArchiveExtractionTest extends EccubeTestCase
+final class ArchiveExtractionTest extends EccubeTestCase
 {
-    /** @var DataMigrationService */
-    private $service;
+    private ?DataMigrationService $service = null;
 
-    /** @var string */
-    private $fixturesDir;
+    private ?string $fixturesDir = null;
 
-    /** @var string */
-    private $tmpDir;
+    private ?string $tmpDir = null;
 
     public function setUp(): void
     {
@@ -35,29 +35,28 @@ class ArchiveExtractionTest extends EccubeTestCase
         parent::tearDown();
     }
 
-    public function tarGzProvider()
+    /**
+     * @return \Iterator<string, array{string, list<string>}>
+     */
+    public static function tarGzProvider(): \Iterator
     {
-        return [
-            '2.11系' => ['2_11_5.tar.gz', ['bkup_data.csv', 'autoinc_data.csv']],
-            '2.12系' => ['2_12_6.tar.gz', ['dtb_customer.csv', 'dtb_order.csv', 'dtb_member.csv']],
-            '2.13系' => ['2_13_5.tar.gz', ['dtb_customer.csv', 'dtb_order.csv', 'dtb_member.csv']],
-            '3.0.9' => ['3_0_9.tar.gz', ['dtb_product.csv', 'dtb_customer.csv']],
-            '3.0.18' => ['3_0_18.tar.gz', ['dtb_product.csv', 'dtb_customer.csv']],
-            '4.0系' => ['4_0_6.tar.gz', ['dtb_order_item.csv', 'dtb_customer.csv']],
-            '4.1系' => ['4_1_2.tar.gz', ['dtb_order_item.csv', 'dtb_customer.csv']],
-            'member_test' => ['member_test.tar.gz', ['dtb_member.csv', 'mtb_authority.csv']],
-        ];
+        yield '2.11系' => ['2_11_5.tar.gz', ['bkup_data.csv', 'autoinc_data.csv']];
+        yield '2.12系' => ['2_12_6.tar.gz', ['dtb_customer.csv', 'dtb_order.csv', 'dtb_member.csv']];
+        yield '2.13系' => ['2_13_5.tar.gz', ['dtb_customer.csv', 'dtb_order.csv', 'dtb_member.csv']];
+        yield '3.0.9' => ['3_0_9.tar.gz', ['dtb_product.csv', 'dtb_customer.csv']];
+        yield '3.0.18' => ['3_0_18.tar.gz', ['dtb_product.csv', 'dtb_customer.csv']];
+        yield '4.0系' => ['4_0_6.tar.gz', ['dtb_order_item.csv', 'dtb_customer.csv']];
+        yield '4.1系' => ['4_1_2.tar.gz', ['dtb_order_item.csv', 'dtb_customer.csv']];
+        yield 'member_test' => ['member_test.tar.gz', ['dtb_member.csv', 'mtb_authority.csv']];
     }
 
-    /**
-     * @dataProvider tarGzProvider
-     */
-    public function testTarGz解凍(string $filename, array $expectedFiles)
+    #[DataProvider(methodName: 'tarGzProvider')]
+    public function testTarGz解凍(string $filename, array $expectedFiles): void
     {
         $archivePath = $this->fixturesDir . $filename;
         $fileNames = $this->service->extractArchive($archivePath, $this->tmpDir);
 
-        self::assertNotEmpty($fileNames, $filename . ' のファイル一覧が空');
+        $this->assertNotEmpty($fileNames, $filename . ' のファイル一覧が空');
 
         // 期待するファイルが解凍されているか確認
         foreach ($expectedFiles as $expected) {
@@ -72,11 +71,11 @@ class ArchiveExtractionTest extends EccubeTestCase
                     break;
                 }
             }
-            self::assertTrue($found, $filename . ' から ' . $expected . ' が解凍されていること');
+            $this->assertTrue($found, $filename . ' から ' . $expected . ' が解凍されていること');
         }
     }
 
-    public function testZip解凍()
+    public function testZip解凍(): void
     {
         // テスト用ZIPを作成
         $zipPath = $this->tmpDir . '/test.zip';
@@ -91,13 +90,13 @@ class ArchiveExtractionTest extends EccubeTestCase
 
         $fileNames = $this->service->extractArchive($zipPath, $outputDir);
 
-        self::assertContains('dtb_customer.csv', $fileNames);
-        self::assertContains('dtb_product.csv', $fileNames);
-        self::assertFileExists($outputDir . '/dtb_customer.csv');
-        self::assertFileExists($outputDir . '/dtb_product.csv');
+        $this->assertContains('dtb_customer.csv', $fileNames);
+        $this->assertContains('dtb_product.csv', $fileNames);
+        $this->assertFileExists($outputDir . '/dtb_customer.csv');
+        $this->assertFileExists($outputDir . '/dtb_product.csv');
     }
 
-    public function test不正なファイルで例外()
+    public function test不正なファイルで例外(): void
     {
         $badFile = $this->tmpDir . '/bad.tar.gz';
         file_put_contents($badFile, 'not an archive');

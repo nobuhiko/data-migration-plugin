@@ -1,76 +1,70 @@
 <?php
 
-namespace Plugin\DataMigration43\Controller\Admin;
+namespace Plugin\DataMigration44\Controller\Admin;
 
+use Eccube\Service\Payment\Method\Cash;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Eccube\Controller\AbstractController;
 use Eccube\Service\PluginService;
 use Eccube\Util\StringUtil;
 use nobuhiko\BulkInsertQuery\BulkInsertQuery;
-use Plugin\DataMigration43\Form\Type\Admin\ConfigType;
-use Plugin\DataMigration43\Service\DataMigrationService;
-use Symfony\Component\Routing\Annotation\Route;
-use Sensio\Bundle\FrameworkExtraBundle\Configuration\Template;
+use Plugin\DataMigration44\Form\Type\Admin\ConfigType;
+use Plugin\DataMigration44\Service\DataMigrationService;
+use Symfony\Bridge\Twig\Attribute\Template;
 use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Routing\Attribute\Route;
 
 class ConfigController extends AbstractController
 {
-    /** @var pluginService */
-    protected $pluginService;
-    protected $dataMigrationService;
+    /** @var array<string, array<string, mixed>> */
+    protected array $tax_rule = [];
 
-    /** @var array */
-    protected $tax_rule = [];
+    /** @var array<int|string, mixed> */
+    protected array $delivery_time = [];
 
-    /** @var array */
-    protected $delivery_time = [];
+    protected ?Connection $em = null;
+    /** @var array<int|string, mixed> */
+    protected array $delivery_id = [];
+    /** @var array<int|string, mixed> */
+    protected array $stock = [];
+    /** @var array<int|string, mixed> */
+    public array $shipping_id = [];
+    /** @var array<int|string, mixed> */
+    protected array $product_class_id = [];
+    /** @var array<int|string, mixed> */
+    protected array $order_item = [];
+    /** @var array<int|string, mixed> */
+    protected array $product_images = [];
+    /** @var array<string, mixed> */
+    protected array $baseinfo = [];
+    /** @var array<int|string, mixed> */
+    protected array $dtb_class_combination = [];
+    /** @var array<int|string, mixed> */
+    protected array $shipping_order = [];
+    /** @var array<int|string, mixed> */
+    protected array $customer_point = [];
+    /** @var array<int, bool>|null */
+    protected ?array $memberIdSet = null;
+    /** @var array<int, bool> */
+    protected array $missingCreatorIds = [];
+    /** ECCUBE2Downloads用: 2.xのダウンロード商品 product_type_id */
+    protected ?int $downloadProductTypeId = null;
 
-    /** @var Connection */
-    protected $em;
-    /** @var array */
-    protected $delivery_id = [];
-    /** @var array */
-    protected $stock = [];
-    /** @var array */
-    public $shipping_id = [];
-    /** @var array */
-    protected $product_class_id = [];
-    /** @var array */
-    protected $order_item = [];
-    /** @var array */
-    protected $product_images = [];
-    /** @var array */
-    protected $baseinfo = [];
-    /** @var array */
-    protected $dtb_class_combination = [];
-    /** @var array */
-    protected $shipping_order = [];
-    /** @var array */
-    protected $customer_point = [];
-    protected $memberIdSet = null; // array<int,bool>
-    protected $missingCreatorIds = []; // array<int,bool>
-    /** @var int|null ECCUBE2Downloads用: 2.xのダウンロード商品 product_type_id */
-    protected $downloadProductTypeId = null;
-
-    /**
-     * constructor.
-     *
-     * @param pluginService $pluginService
-     */
     public function __construct(
-        PluginService $pluginService,
-        DataMigrationService $dataMigrationService
+        protected readonly PluginService $pluginService,
+        protected readonly DataMigrationService $dataMigrationService,
     ) {
-        $this->pluginService = $pluginService;
-        $this->dataMigrationService = $dataMigrationService;
     }
 
     /**
-     * @Route("/%eccube_admin_route%/datamigration43/config", name="data_migration43_admin_config")
-     * @Template("@DataMigration43/admin/config.twig")
+     * @return array<string, mixed>|RedirectResponse
      */
-    public function index(Request $request, Connection $em)
+    #[Route(path: '/%eccube_admin_route%/datamigration44/config', name: 'data_migration44_admin_config', methods: ['GET', 'POST'])]
+    #[Template(template: '@DataMigration44/admin/config.twig')]
+    public function index(Request $request, Connection $em): array|RedirectResponse
     {
         $this->delivery_id = [];
         $this->stock = [];
@@ -82,7 +76,7 @@ class ConfigController extends AbstractController
         $form = $this->createForm(ConfigType::class);
         $form->handleRequest($request);
 
-        if (0 === strpos(PHP_OS, 'WIN')) {
+        if (str_starts_with(PHP_OS, 'WIN')) {
             setlocale(LC_CTYPE, 'C');
         }
 
@@ -102,16 +96,16 @@ class ConfigController extends AbstractController
 
             if ($this->dataMigrationService->isVersion('2.4.4')) {
                 // create dtb_shipping
-                $this->fix24Shipping($em, $csvDir);
-                $this->fix24ProductsClass($em, $csvDir);
+                $this->fix24Shipping($csvDir);
+                $this->fix24ProductsClass($csvDir);
             } elseif ($this->dataMigrationService->isVersion('3')) {
-                $this->fixPlgPoint($em, $csvDir); // ポイントプラグイン
+                $this->fixPlgPoint($csvDir); // ポイントプラグイン
             }
 
             // 2.13以外全部
             if (!file_exists($csvDir . 'dtb_tax_rule.csv')) {
                 // 税率など
-                $this->fix24baseinfo($em, $csvDir);
+                $this->fix24baseinfo($csvDir);
             }
 
             if ($this->dataMigrationService->isVersion('4.0/4.1')) {
@@ -172,6 +166,9 @@ class ConfigController extends AbstractController
                 }
             }
 
+            // 4.4 で追加された在庫フラグを再計算
+            $this->dataMigrationService->recalcInStock($em);
+
             // 削除
             $fs = new Filesystem();
             $fs->remove($tmpDir);
@@ -179,7 +176,7 @@ class ConfigController extends AbstractController
             $this->dataMigrationService->updateEnv($form['auth_magic']->getData());
 
             // 存在しないルート名を修正
-            return $this->redirectToRoute('data_migration43_admin_config');
+            return $this->redirectToRoute('data_migration44_admin_config');
         }
 
         // バリデーションエラー時の内容を確認
@@ -238,7 +235,7 @@ class ConfigController extends AbstractController
         if (!empty($this->order_item)) {
             // すでに移行されている税率設定から取得する
             $sql = 'SELECT * FROM dtb_tax_rule WHERE product_id IS NULL AND product_class_id IS NULL ORDER BY apply_date DESC';
-            $stmt = $em->query($sql);
+            $stmt = $em->executeQuery($sql);
             $tax_rules = $stmt->fetchAllAssociative();
             foreach ($tax_rules as $tax_rule) {
                 $this->tax_rule[$tax_rule['apply_date']] = [
@@ -251,7 +248,7 @@ class ConfigController extends AbstractController
         }
 
         if ($platform == 'mysql') {
-            $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+            $em->executeStatement('SET FOREIGN_KEY_CHECKS = 1;');
         } else {
             $this->dataMigrationService->setIdSeq($em, 'dtb_customer');
             $this->dataMigrationService->setIdSeq($em, 'dtb_customer_address');
@@ -293,7 +290,7 @@ class ConfigController extends AbstractController
 
 
             if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+                $em->executeStatement('SET FOREIGN_KEY_CHECKS = 1;');
             } else {
                 $this->dataMigrationService->setIdSeq($em, 'dtb_member');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_customer');
@@ -309,7 +306,7 @@ class ConfigController extends AbstractController
 
     private function saveToC($em, $tmpDir, $csvName, $tableName = null, $allow_zero = false, $i = 1)
     {
-        $tableName = ($tableName) ? $tableName : $csvName;
+        $tableName = $tableName ?: $csvName;
         $this->dataMigrationService->resetTable($em, $tableName);
 
         if (!file_exists($tmpDir . $csvName . '.csv')) {
@@ -321,9 +318,9 @@ class ConfigController extends AbstractController
 
         if (($handle = fopen($tmpDir . $csvName . '.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
 
-            $columns = $em->getSchemaManager()->listTableColumns($tableName);
+            $columns = $em->createSchemaManager()->listTableColumns($tableName);
             $listTableColumns = [];
             foreach ($columns as $column) {
                 $listTableColumns[] = $column->getName();
@@ -351,12 +348,12 @@ class ConfigController extends AbstractController
                             $value[$column] = empty($data[$column]) ? 0 : (int) $data[$column];
                         } elseif ($column == 'two_factor_auth_enabled' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
                             // 4.0系には存在しないカラム。デフォルト値として0（無効）を設定
-                            $value[$column] = isset($data[$column]) ? $data[$column] : 0;
+                            $value[$column] = $data[$column] ?? 0;
                         } elseif ($column == 'two_factor_auth_key' && ($tableName == 'dtb_member' || $tableName == 'dtb_customer')) {
                             // 4.0系には存在しないカラム。NULLを設定
-                            $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                            $value[$column] = $data[$column] ?? null;
                         } elseif ($allow_zero) {
-                            $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                            $value[$column] = $data[$column] ?? null;
                         } else {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         }
@@ -394,7 +391,8 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'password' || $column == 'name01' || $column == 'name02') {
                             $value[$column] = empty($data[$column]) ? 'Not null violation' : $data[$column];
                         } elseif ($column == 'sort_no') {
-                            $value[$column] = $this->dataMigrationService->isVersion('4.0/4.1') ? $data['sort_no'] : $data['rank'];
+                            // この分岐は 4.0/4.1 以外 (上の else 側) でのみ到達する
+                            $value[$column] = $data['rank'];
                         } elseif ($column == 'create_date' || $column == 'update_date') {
                             $value[$column] = (isset($data[$column]) && $data[$column] != '0000-00-00 00:00:00') ? self::convertTz($data[$column]) : date('Y-m-d H:i:s');
                         } elseif ($column == 'login_date' || $column == 'first_buy_date') {
@@ -413,7 +411,7 @@ class ConfigController extends AbstractController
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 1;
                         } elseif ($column == 'two_factor_auth_enabled' && $tableName == 'dtb_member') {
                             // 4.0系には存在しないカラム。デフォルト値として0（無効）を設定
-                            $value[$column] = isset($data[$column]) ? $data[$column] : 0;
+                            $value[$column] = $data[$column] ?? 0;
                         } elseif ($column == 'plg_mailmagazine_flg') {
                             $value[$column] = (!empty($data['mailmaga_flg']) && $data['mailmaga_flg'] != 3) ? 1 : 0;
                         } elseif ($column == 'id' && $tableName == 'dtb_member') {
@@ -424,7 +422,7 @@ class ConfigController extends AbstractController
                             $search = ['dtb_', 'mtb_', '_'];
                             $value[$column] = str_replace($search, '', $tableName);
                         } elseif ($allow_zero) {
-                            $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                            $value[$column] = $data[$column] ?? null;
                         } else {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         }
@@ -432,7 +430,7 @@ class ConfigController extends AbstractController
                 }
 
                 $value = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $value);
-                $builder->setValues($value);
+                $builder->setValues($this->dataMigrationService->fillNotNullDefaults($em, $tableName, $value));
 
                 if (($i % $batchSize) === 0) {
                     try {
@@ -474,11 +472,11 @@ class ConfigController extends AbstractController
             $platform = $this->dataMigrationService->begin($em, "Product");
 
             // ECCUBE2Downloads がインストール済みの場合、ダウンロード商品の product_type_id を検出
-            if (file_exists($csvDir . 'mtb_product_type.csv') && $this->dataMigrationService->isPluginInstalled($em, 'ECCUBE2Downloads')) {
+            if (file_exists($csvDir . 'mtb_product_type.csv') && $this->dataMigrationService->isPluginInstalled($em, 'ECCUBE2Downloads44')) {
                 $csvFile = $csvDir . 'mtb_product_type.csv';
                 if (($handle = fopen($csvFile, 'r')) !== false) {
                     $key = fgetcsv($handle);
-                    $key = array_filter(array_map('trim', $key));
+                    $key = array_filter(array_map(trim(...), $key));
                     while (($row = fgetcsv($handle)) !== false) {
                         $data = array_combine($key, $row);
                         $name = $data['name'] ?? '';
@@ -535,7 +533,7 @@ class ConfigController extends AbstractController
             $this->dataMigrationService->fixDeletedProduct($em);
 
             if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+                $em->executeStatement('SET FOREIGN_KEY_CHECKS = 1;');
             } else {
                 // シーケンスを進めてあげないといけない
                 $this->dataMigrationService->setIdSeq($em, 'dtb_product');
@@ -564,7 +562,7 @@ class ConfigController extends AbstractController
 
     private function saveToP($em, $tmpDir, $csvName, $tableName = null, $allow_zero = false, $i = 1)
     {
-        $tableName = ($tableName) ? $tableName : $csvName;
+        $tableName = $tableName ?: $csvName;
         // 通常: 既存のフルリセット (UPsert 対象マスタは saveProduct から upsertMaster 経由で別処理済)
         $this->dataMigrationService->resetTable($em, $tableName);
 
@@ -581,10 +579,10 @@ class ConfigController extends AbstractController
             // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             $keySize = count($key);
 
-            $columns = $em->getSchemaManager()->listTableColumns($tableName);
+            $columns = $em->createSchemaManager()->listTableColumns($tableName);
             $listTableColumns = [];
             foreach ($columns as $column) {
                 $listTableColumns[] = $column->getName();
@@ -614,7 +612,7 @@ class ConfigController extends AbstractController
                 if ($tableName === 'dtb_product_class') {
                     // 存在しないカテゴリ参照は NULL に変更
                     foreach (['class_category_id1', 'class_category_id2', 'classcategory_id1', 'classcategory_id2'] as $catCol) {
-                        if (isset($data[$catCol]) && $data[$catCol] !== null && $data[$catCol] !== '') {
+                        if (isset($data[$catCol]) && $data[$catCol] !== '') {
                             $catId = (int)$data[$catCol];
                             if ($catId === 0) {
                                 $data[$catCol] = null;
@@ -639,7 +637,7 @@ class ConfigController extends AbstractController
                 if ($tableName === 'dtb_product_class') {
                     // 存在しないカテゴリ参照は NULL に変更
                     foreach (['class_category_id1', 'class_category_id2'] as $catCol) {
-                        if (isset($data[$catCol]) && $data[$catCol] !== null && $data[$catCol] !== '') {
+                        if (isset($data[$catCol]) && $data[$catCol] !== '') {
                             $catId = (int)$data[$catCol];
                             if ($catId === 0) {
                                 $data[$catCol] = null;
@@ -696,7 +694,7 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'visible') {
                             $value[$column] = empty($data[$column]) ? 0 : $data[$column];
                         } elseif ($allow_zero) {
-                            $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                            $value[$column] = $data[$column] ?? null;
                         } else {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         }
@@ -768,9 +766,9 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'class_category_id') {
                             $value[$column] = !empty($data['classcategory_id']) ? $data['classcategory_id'] : 0;
                         } elseif ($column == 'class_name_id') {
-                            $value[$column] = isset($data['class_id']) ? $data['class_id'] : null;
+                            $value[$column] = $data['class_id'] ?? null;
                         } elseif ($column == 'create_date' || $column == 'update_date') {
-                            $value[$column] = (isset($data[$column]) && strpos($data[$column], '000') === false) ? self::convertTz($data[$column]) : date('Y-m-d H:i:s');
+                            $value[$column] = (isset($data[$column]) && !str_contains($data[$column], '000')) ? self::convertTz($data[$column]) : date('Y-m-d H:i:s');
                         } elseif ($column == 'login_date' || $column == 'first_buy_date') {
                             $value[$column] = (!empty($data[$column]) && $data[$column] != '0000-00-00 00:00:00') ? self::convertTz($data[$column]) : null;
                         } elseif ($column == 'creator_id') {
@@ -799,16 +797,16 @@ class ConfigController extends AbstractController
                             $value[$column] = $i;
                         } elseif ($column == 'tag_id' && $tableName == 'dtb_product_tag') {
                             if ($this->dataMigrationService->isVersion('3')) {
-                                $value[$column] = isset($data['tag']) && strlen($data['tag'] > 0) ? $data['tag'] : 0;
+                                $value[$column] = isset($data['tag']) && $data['tag'] > 0 ? $data['tag'] : 0;
                             } else {
-                                $value[$column] = isset($data['product_status_id']) && strlen($data['product_status_id'] > 0) ? $data['product_status_id'] : 0;
+                                $value[$column] = isset($data['product_status_id']) && $data['product_status_id'] > 0 ? $data['product_status_id'] : 0;
                             }
                             // 共通処理
                         } elseif ($column == 'discriminator_type') {
                             $search = ['dtb_', 'mtb_', '_'];
                             $value[$column] = str_replace($search, '', $tableName);
                         } elseif ($allow_zero) {
-                            $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                            $value[$column] = $data[$column] ?? null;
                         } else {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         }
@@ -876,7 +874,7 @@ class ConfigController extends AbstractController
                 // PostgreSQL対応: 最終チェックで数値フィールドの空文字をNULLに変換
                 $value = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $value);
 
-                $builder->setValues($value);
+                $builder->setValues($this->dataMigrationService->fillNotNullDefaults($em, $tableName, $value));
 
                 if (($i % $batchSize) === 0) {
                     $builder->execute();
@@ -911,19 +909,17 @@ class ConfigController extends AbstractController
             return 0;
         }
         $key = fgetcsv($handle);
-        $key = array_filter(array_map('trim', $key));
+        $key = array_filter(array_map(trim(...), $key));
         if (empty($key)) {
             fclose($handle);
             return 0;
         }
-        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $columns = $em->createSchemaManager()->listTableColumns($tableName);
         $listTableColumns = [];
         foreach ($columns as $column) {
             $listTableColumns[] = $column->getName();
         }
-        $updateCols = array_filter($listTableColumns, function ($c) {
-            return $c !== 'id' && $c !== 'create_date';
-        });
+        $updateCols = array_filter($listTableColumns, fn($c) => $c !== 'id' && $c !== 'create_date');
         $discriminator = $options['discriminator'] ?? null;
         $colMap = $options['columnMappings'] ?? [];
         $rowCount = 0;
@@ -947,7 +943,7 @@ class ConfigController extends AbstractController
                     $insertValues[$col] = null;
                 }
             }
-            if (!isset($insertValues['id']) || $insertValues['id'] === '' || $insertValues['id'] === null) {
+            if (!isset($insertValues['id']) || $insertValues['id'] === '') {
                 continue; // PK 無し
             }
             // name 空文字補完 (存在する場合)
@@ -958,17 +954,16 @@ class ConfigController extends AbstractController
                 $insertValues['sort_no'] = is_numeric($insertValues['id']) ? (int) $insertValues['id'] : 0;
             }
             foreach (['create_date', 'update_date'] as $dcol) {
-                if (array_key_exists($dcol, $insertValues) && ($insertValues[$dcol] === null || $insertValues[$dcol] === '' || strpos((string)$insertValues[$dcol], '0000') === 0)) {
+                if (array_key_exists($dcol, $insertValues) && ($insertValues[$dcol] === null || $insertValues[$dcol] === '' || str_starts_with((string)$insertValues[$dcol], '0000'))) {
                     $insertValues[$dcol] = $now;
                 }
             }
+            $insertValues = $this->dataMigrationService->fillNotNullDefaults($em, $tableName, $insertValues);
             $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
             $placeholders = implode(',', array_fill(0, count($insertValues), '?'));
-            $updateSql = implode(', ', array_map(function ($c) {
-                return '"' . $c . '" = EXCLUDED."' . $c . '"';
-            }, $updateCols));
+            $updateSql = implode(', ', array_map(fn($c) => '"' . $c . '" = EXCLUDED."' . $c . '"', $updateCols));
             $sql = 'INSERT INTO ' . $em->quoteIdentifier($tableName) . ' (' . $colsSql . ') VALUES (' . $placeholders . ') ON CONFLICT (id) DO UPDATE SET ' . $updateSql;
-            $em->prepare($sql)->executeStatement(array_values($insertValues));
+            $em->executeStatement($sql, array_values($insertValues));
             $rowCount++;
         }
         fclose($handle);
@@ -985,7 +980,7 @@ class ConfigController extends AbstractController
     private function upsertMaster($em, $dir, $csvName, $tableName = null, $allow_zero = false, array $options = [])
     {
         $tableName = $tableName ?: $csvName;
-        $isPostgres = $em->getDatabasePlatform()->getName() === 'postgresql';
+        $isPostgres = $em->getDatabasePlatform() instanceof PostgreSQLPlatform;
         if ($isPostgres) {
             $mergedOptions = $this->buildMasterUpsertOptions($tableName, $options);
             return $this->upsertMasterFromCsv($em, $dir, $csvName, $tableName, $mergedOptions);
@@ -1010,7 +1005,7 @@ class ConfigController extends AbstractController
         // discriminator 未指定なら自動生成: mtb_ プレフィックス除去しアンダースコア除去
         // 例) mtb_sale_type -> saletype, mtb_device_type -> devicetype
         if (!isset($override['discriminator'])) {
-            if (strpos($tableName, 'mtb_') === 0) {
+            if (str_starts_with($tableName, 'mtb_')) {
                 $discriminator = substr($tableName, 4); // プレフィックス除去
             } else {
                 $discriminator = $tableName;
@@ -1046,6 +1041,7 @@ class ConfigController extends AbstractController
         $hasAuthority = file_exists($authorityCsv) && filesize($authorityCsv) > 0;
         $hasMember    = file_exists($memberCsv) && filesize($memberCsv) > 0;
         if (!$hasAuthority && !$hasMember) {
+            $em->rollBack(); // begin() したトランザクションを閉じる
             return; // どちらも無し
         }
 
@@ -1058,19 +1054,21 @@ class ConfigController extends AbstractController
             }
             if ($hasMember) {
                 // 既存メンバーを一旦非稼働化
-                $em->exec('UPDATE dtb_member SET work_id = 0');
+                $em->executeStatement('UPDATE dtb_member SET work_id = 0');
                 // CSV を読み取り UPSERT
                 $file = $memberCsv;
                 if (($handle = fopen($file, 'r')) === false) {
+                    $em->rollBack(); // begin() したトランザクションを閉じる
                     return;
                 }
                 $key = fgetcsv($handle);
-                $key = array_filter(array_map('trim', $key));
+                $key = array_filter(array_map(trim(...), $key));
                 if (empty($key)) {
                     fclose($handle);
+                    $em->rollBack(); // begin() したトランザクションを閉じる
                     return;
                 }
-                $columns = $em->getSchemaManager()->listTableColumns('dtb_member');
+                $columns = $em->createSchemaManager()->listTableColumns('dtb_member');
                 $listTableColumns = [];
                 foreach ($columns as $c) {
                     $listTableColumns[] = $c->getName();
@@ -1122,13 +1120,13 @@ class ConfigController extends AbstractController
                         continue; // PK無
                     }
                     foreach (['create_date', 'update_date'] as $dcol) {
-                        if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || strpos($insertValues[$dcol], '0000') === 0)) {
+                        if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || str_starts_with($insertValues[$dcol], '0000'))) {
                             $insertValues[$dcol] = $now;
                         }
                     }
                     // login_dateなどのNULL許可のタイムスタンプカラムは、空文字列をnullに変換
                     foreach (['login_date', 'first_buy_date', 'last_buy_date', 'payment_date'] as $dcol) {
-                        if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || strpos($insertValues[$dcol], '0000') === 0)) {
+                        if (isset($insertValues[$dcol]) && (empty($insertValues[$dcol]) || str_starts_with($insertValues[$dcol], '0000'))) {
                             $insertValues[$dcol] = null;
                         }
                     }
@@ -1140,11 +1138,12 @@ class ConfigController extends AbstractController
                         $insertValues['two_factor_auth_key'] = null; // NULL許可（この行は冗長だが明示的に残す）
                     }
                     $insertValues = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, 'dtb_member', $insertValues);
+                    $insertValues = $this->dataMigrationService->fillNotNullDefaults($em, 'dtb_member', $insertValues);
                     $colsSql = implode(',', array_map(fn($c) => '"' . $c . '"', array_keys($insertValues)));
                     $placeholders = implode(',', array_fill(0, count($insertValues), '?'));
                     $updateSql = implode(', ', array_map(fn($c) => '"' . $c . '" = EXCLUDED."' . $c . '"', $updateCols));
                     $sql = 'INSERT INTO dtb_member (' . $colsSql . ') VALUES (' . $placeholders . ') ON CONFLICT (id) DO UPDATE SET ' . $updateSql;
-                    $em->prepare($sql)->executeStatement(array_values($insertValues));
+                    $em->executeStatement($sql, array_values($insertValues));
                 }
                 fclose($handle);
                 $this->dataMigrationService->setIdSeq($em, 'dtb_member');
@@ -1156,7 +1155,7 @@ class ConfigController extends AbstractController
                 foreach ($ids as $id) {
                     $this->memberIdSet[(int)$id] = true;
                 }
-            } catch (\Exception $e) {
+            } catch (\Exception) {
                 $this->memberIdSet = [];
             }
         } else { // MySQL 他
@@ -1173,7 +1172,7 @@ class ConfigController extends AbstractController
                 foreach ($ids as $id) {
                     $this->memberIdSet[(int)$id] = true;
                 }
-            } catch (\Exception $e) {
+            } catch (\Exception) {
                 $this->memberIdSet = [];
             }
         }
@@ -1200,7 +1199,7 @@ class ConfigController extends AbstractController
                 fclose($h);
                 continue;
             }
-            $header = array_map('trim', $header);
+            $header = array_map(trim(...), $header);
             $idx = array_search('creator_id', $header, true);
             if ($idx === false) {
                 fclose($h);
@@ -1228,12 +1227,12 @@ class ConfigController extends AbstractController
         }
     }
 
-    private function fix24shipping($em, $tmpdir)
+    private function fix24shipping($tmpdir)
     {
         if (($handle = fopen($tmpdir . 'dtb_order.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             $keysize = count($key);
 
             $i = 1;
@@ -1248,13 +1247,13 @@ class ConfigController extends AbstractController
                     $value[str_replace('deliv_', 'shipping_', $k)] = $v;
                 }
 
-                $value['deliv_time_id'] = isset($data['deliv_time_id']) ? $data['deliv_time_id'] : null;
+                $value['deliv_time_id'] = $data['deliv_time_id'] ?? null;
                 $value['shipping_id'] = 0;
                 $value['rank'] = 0;
                 if (!empty($value['shipping_date'])) {
                     // 変な文字が来る 18/12/29(土)
                     preg_match_all('/[\d.]+/', $value['shipping_date'], $matches);
-                    $value['shipping_date'] = date('y-m-d', mktime(0, 0, 0, $matches[0][1], $matches[0][2], '20' . $matches[0][0]));
+                    $value['shipping_date'] = date('y-m-d', mktime(0, 0, 0, (int) $matches[0][1], (int) $matches[0][2], (int) ('20' . $matches[0][0])));
                 }
                 $value['del_flg'] = $data['del_flg'];
                 $value['order_id'] = $data['order_id'];
@@ -1282,12 +1281,12 @@ class ConfigController extends AbstractController
     }
 
     // 2.4系のclassを追加する
-    private function fix24ProductsClass($em, $tmpDir)
+    private function fix24ProductsClass($tmpDir)
     {
         if (($handle = fopen($tmpDir . 'dtb_products_class.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             $keySize = count($key);
 
             $i = -1;
@@ -1322,12 +1321,12 @@ class ConfigController extends AbstractController
         if (($handle = fopen($tmpDir . 'dtb_class_combination.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             $keySize = count($key);
 
             if ($platform == 'mysql') {
                 // mysql5.6でエラーになるのでtempは使えない
-                $em->exec('
+                $em->executeStatement('
                     CREATE TABLE IF NOT EXISTS dtb_class_combination (
                     class_combination_id int NOT NULL,
                     parent_class_combination_id int,
@@ -1337,7 +1336,7 @@ class ConfigController extends AbstractController
                     ) ENGINE=InnoDB;
                 ');
             } else {
-                $em->exec('
+                $em->executeStatement('
                     CREATE TEMP TABLE dtb_class_combination (
                         class_combination_id int,
                         parent_class_combination_id int,
@@ -1361,11 +1360,12 @@ class ConfigController extends AbstractController
                     $data['parent_class_combination_id'] = null;
                 }
 
-                $builder->setValues($data);
+                $builder->setValues($this->dataMigrationService->fillNotNullDefaults($em, 'dtb_class_combination', $data));
 
                 if (($i % $batchSize) === 0) {
                     $builder->execute();
                 }
+                $i++;
             }
             if (count($builder->getValues()) > 0) {
                 $builder->execute();
@@ -1374,7 +1374,7 @@ class ConfigController extends AbstractController
             fclose($handle);
         }
 
-        $stmt = $em->query('
+        $stmt = $em->executeQuery('
         SELECT
         class_combination_id
         , (select classcategory_id from dtb_class_combination where class_combination_id = c1.parent_class_combination_id) as classcategory_id1
@@ -1389,7 +1389,7 @@ class ConfigController extends AbstractController
             $this->dtb_class_combination[$line['class_combination_id']] = $line;
         }
 
-        $stmt = $em->query('
+        $stmt = $em->executeQuery('
         SELECT
         class_combination_id
         , classcategory_id as classcategory_id1
@@ -1407,7 +1407,7 @@ class ConfigController extends AbstractController
     private function saveStock($em)
     {
         $tableName = 'dtb_product_stock';
-        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $columns = $em->createSchemaManager()->listTableColumns($tableName);
 
         $listTableColumns = [];
         foreach ($columns as $column) {
@@ -1417,7 +1417,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM ' . $em->quoteIdentifier($tableName));
+        $em->executeStatement('DELETE FROM ' . $em->quoteIdentifier($tableName));
 
         $i = 1;
         $batchSize = 20;
@@ -1429,7 +1429,7 @@ class ConfigController extends AbstractController
             $data['create_date'] = $data['update_date'] = date('Y-m-d H:i:s');
             $data['discriminator_type'] = 'productstock';
 
-            $builder->setValues($data);
+            $builder->setValues($this->dataMigrationService->fillNotNullDefaults($em, $tableName, $data));
 
             // 20件に1回SQLを発行してメモリを開放する。
             if (($i % $batchSize) === 0) {
@@ -1446,7 +1446,7 @@ class ConfigController extends AbstractController
     private function saveProductImage($em)
     {
         $tableName = 'dtb_product_image';
-        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $columns = $em->createSchemaManager()->listTableColumns($tableName);
 
         $listTableColumns = [];
         foreach ($columns as $column) {
@@ -1456,7 +1456,7 @@ class ConfigController extends AbstractController
         $builder = new BulkInsertQuery($em, $tableName);
         $builder->setColumns($listTableColumns);
 
-        $em->exec('DELETE FROM ' . $em->quoteIdentifier($tableName));
+        $em->executeStatement('DELETE FROM ' . $em->quoteIdentifier($tableName));
 
         $i = 1;
         $batchSize = 20;
@@ -1471,7 +1471,7 @@ class ConfigController extends AbstractController
                 $data['create_date'] = date('Y-m-d H:i:s');
                 $data['discriminator_type'] = 'productimage';
 
-                $builder->setValues($data);
+                $builder->setValues($this->dataMigrationService->fillNotNullDefaults($em, $tableName, $data));
 
                 // 20件に1回SQLを発行してメモリを開放する。
                 if (($i % $batchSize) === 0) {
@@ -1523,10 +1523,6 @@ class ConfigController extends AbstractController
 
             // fixme dtb_delivery_time のあとにやらなければダメ
             $this->saveToO($em, $csvDir, 'dtb_shipping');
-
-            if (!isset($this->product_class_id)) {
-                sleep(5);
-            }
             // todo 商品別税率設定
             $this->saveToO($em, $csvDir, 'dtb_tax_rule', null, true); // 税率0にしている場合がある
 
@@ -1546,11 +1542,11 @@ class ConfigController extends AbstractController
 
             if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
                 // 支払いは基本移行しない
-                $em->exec('DELETE FROM dtb_payment_option');
+                $em->executeStatement('DELETE FROM dtb_payment_option');
             }
 
             if ($platform == 'mysql') {
-                $em->exec('SET FOREIGN_KEY_CHECKS = 1;');
+                $em->executeStatement('SET FOREIGN_KEY_CHECKS = 1;');
             } else {
                 $this->dataMigrationService->setIdSeq($em, 'mtb_device_type');
                 $this->dataMigrationService->setIdSeq($em, 'dtb_order');
@@ -1565,7 +1561,7 @@ class ConfigController extends AbstractController
             }
 
             // イレギュラー対応
-            $em->exec('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
+            $em->executeStatement('UPDATE dtb_order SET order_status_id = NULL WHERE order_status_id not in (select id from mtb_order_status)');
 
             $em->commit();
 
@@ -1577,7 +1573,7 @@ class ConfigController extends AbstractController
 
     private function saveToO($em, $tmpDir, $csvName, $tableName = null, $allow_zero = false, $i = 1)
     {
-        $tableName = ($tableName) ? $tableName : $csvName;
+        $tableName = $tableName ?: $csvName;
         // 通常: リセット (UPSERT 対象は saveOrder で upsertMaster 呼び出し済のためここに来ない想定)
         $this->dataMigrationService->resetTable($em, $tableName);
         $creatorFallbackApplied = 0;
@@ -1598,10 +1594,10 @@ class ConfigController extends AbstractController
             // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             $keySize = count($key);
 
-            $columns = $em->getSchemaManager()->listTableColumns($tableName);
+            $columns = $em->createSchemaManager()->listTableColumns($tableName);
             $listTableColumns = [];
             foreach ($columns as $column) {
                 $listTableColumns[] = $column->getName();
@@ -1676,7 +1672,7 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'quantity') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 0;
                         } elseif ($allow_zero) {
-                            $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                            $value[$column] = $data[$column] ?? null;
                         } else {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         }
@@ -1742,9 +1738,9 @@ class ConfigController extends AbstractController
                                 $value[$column] = $productTypeId;
                             }
                         } elseif ($column == 'description') {
-                            $value[$column] = isset($data['remark']) ? $data['remark'] : null;
+                            $value[$column] = $data['remark'] ?? null;
                         } elseif ($column == 'delivery_id') {
-                            $value[$column] = isset($data['deliv_id']) ? $data['deliv_id'] : null;
+                            $value[$column] = $data['deliv_id'] ?? null;
                         } elseif ($column == 'delivery_time') {
                             if (isset($data['deliv_time'])) {
                                 $value[$column] = $data['deliv_time'];
@@ -1782,7 +1778,7 @@ class ConfigController extends AbstractController
                         } elseif ($column == 'sort_no' && $tableName == 'dtb_shipping') {
                             $value[$column] = $data['id'];
                         } elseif ($column == 'sort_no') {
-                            $value[$column] = isset($data['rank']) ? $data['rank'] : 0;
+                            $value[$column] = $data['rank'] ?? 0;
                         } elseif ($column == 'create_date' || $column == 'update_date') {
                             $value[$column] = (isset($data[$column]) && $data[$column] != '0000-00-00 00:00:00') ? self::convertTz($data[$column]) : date('Y-m-d H:i:s');
                         } elseif ($column == 'payment_date') {
@@ -1805,7 +1801,7 @@ class ConfigController extends AbstractController
                             $search = ['dtb_', 'mtb_', '_'];
                             $value[$column] = str_replace($search, '', $tableName);
                         } elseif ($allow_zero) {
-                            $value[$column] = isset($data[$column]) ? $data[$column] : null;
+                            $value[$column] = $data[$column] ?? null;
                         } else {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         }
@@ -1951,9 +1947,7 @@ class ConfigController extends AbstractController
                                 $value['id'] = $i; // 2.4.4
                             }
                             // dtb_order_detail.tax_ruleははdtb_tax_rule.calc_ruleの値
-                            $value['rounding_type_id'] = isset($data['tax_rule'])
-                                ? $data['tax_rule']
-                                : $this->baseinfo['tax_rule'];
+                            $value['rounding_type_id'] = $data['tax_rule'] ?? $this->baseinfo['tax_rule'];
 
                             $value['tax_type_id'] = 1;
                             $value['tax_display_type_id'] = 1;
@@ -1962,7 +1956,7 @@ class ConfigController extends AbstractController
                             $value['tax_rule_id'] = null;
 
                             // 2.4.4, 2.11, 2.12
-                            if (isset($this->baseinfo) && !empty($this->baseinfo)) {
+                            if (!empty($this->baseinfo)) {
                                 $value['tax_rate'] = $data['tax_rate'] = $this->baseinfo['tax'];
                                 $data['point_rate'] = $this->baseinfo['point_rate'];
                             }
@@ -2014,14 +2008,14 @@ class ConfigController extends AbstractController
                         break;
 
                     case 'dtb_payment':
-                        $value['method_class'] = 'Eccube\Service\Payment\Method\Cash';
+                        $value['method_class'] = Cash::class;
                         break;
                 }
 
                 // PostgreSQL対応: 最終チェックで数値フィールドの空文字をNULLに変換
                 $value = $this->dataMigrationService->convertDataTypesForPostgreSQL($em, $tableName, $value);
 
-                $builder->setValues($value);
+                $builder->setValues($this->dataMigrationService->fillNotNullDefaults($em, $tableName, $value));
 
                 if (($i % $batchSize) === 0) {
                     $builder->execute();
@@ -2043,7 +2037,7 @@ class ConfigController extends AbstractController
     private function saveOrderItem($em)
     {
         $tableName = 'dtb_order_item';
-        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $columns = $em->createSchemaManager()->listTableColumns($tableName);
 
         $listTableColumns = [];
         foreach ($columns as $column) {
@@ -2110,7 +2104,7 @@ class ConfigController extends AbstractController
                 } else {
                     $round = 'round';
                 }
-                $data['tax'] = $round($data['price'] * $data['tax_rate'] / 100) * 1;
+                $data['tax'] = $round($data['price'] * $data['tax_rate'] / 100);
                 //$data['tax_adjust'] = 0; // 4.0.2でエラーになる
                 $data['quantity'] = 1;
                 $data['id'] = $i;
@@ -2118,7 +2112,7 @@ class ConfigController extends AbstractController
                 $data['currency_code'] = 'JPY';
                 $data['discriminator_type'] = 'orderitem';
 
-                $builder->setValues($data);
+                $builder->setValues($this->dataMigrationService->fillNotNullDefaults($em, $tableName, $data));
                 // 20件に1回SQLを発行してメモリを開放する。
                 if (($i % $batchSize) === 0) {
                     $builder->execute();
@@ -2131,7 +2125,7 @@ class ConfigController extends AbstractController
             sleep(1);
         }
     }
-    private function fix24baseinfo($em, $tmpDir)
+    private function fix24baseinfo($tmpDir)
     {
         if (!file_exists($tmpDir . 'dtb_baseinfo.csv')) {
             return;
@@ -2140,7 +2134,7 @@ class ConfigController extends AbstractController
         if (($handle = fopen($tmpDir . 'dtb_baseinfo.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             $keySize = count($key);
 
             $add_value = [];
@@ -2170,7 +2164,7 @@ class ConfigController extends AbstractController
     }
 
 
-    private function fixPlgPoint($em, $tmpDir)
+    private function fixPlgPoint($tmpDir)
     {
         if (!file_exists($tmpDir . 'plg_point_customer.csv')) {
             return;
@@ -2179,7 +2173,7 @@ class ConfigController extends AbstractController
         if (($handle = fopen($tmpDir . 'plg_point_customer.csv', 'r')) !== false) {
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
             $keySize = count($key);
 
             $add_value = [];
@@ -2226,7 +2220,7 @@ class ConfigController extends AbstractController
         }
 
         $tableName = str_replace('.csv', '', $csvName);
-        $columns = $em->getSchemaManager()->listTableColumns($tableName);
+        $columns = $em->createSchemaManager()->listTableColumns($tableName);
 
         if ($columns == false) {
             return;
@@ -2247,9 +2241,9 @@ class ConfigController extends AbstractController
         // PostgreSQLの場合、UPSERT用のプライマリキーを取得
         $primaryKeys = [];
         if ($platform === 'postgresql') {
-            $schemaManager = $em->getSchemaManager();
+            $schemaManager = $em->createSchemaManager();
             $table = $schemaManager->introspectTable($tableName);
-            if ($table->hasPrimaryKey()) {
+            if ($table->getPrimaryKey() !== null) {
                 $primaryKeys = $table->getPrimaryKey()->getColumns();
             }
         }
@@ -2263,7 +2257,7 @@ class ConfigController extends AbstractController
             // 文字コード問題が起きる可能性が高いので後で調整が必要になると思う
             $key = fgetcsv($handle);
             // phpmyadminのcsvに余計なスペースが入っているので取り除く
-            $key = array_filter(array_map('trim', $key));
+            $key = array_filter(array_map(trim(...), $key));
 
             $i = 1;
             while (($row = fgetcsv($handle)) !== false) {
@@ -2312,6 +2306,7 @@ class ConfigController extends AbstractController
                 if ($platform === 'postgresql' && !empty($primaryKeys)) {
                     // PostgreSQLはUPSERTで行ごとに処理
                     try {
+                        $value = $this->dataMigrationService->fillNotNullDefaults($em, $tableName, $value);
                         $cols = array_map(fn($c) => '"' . $c . '"', array_keys($value));
                         $placeholders = array_fill(0, count($value), '?');
                         $updateCols = array_filter(array_keys($value), fn($c) => !in_array($c, $primaryKeys));
@@ -2331,7 +2326,7 @@ class ConfigController extends AbstractController
                     }
                 } else {
                     // MySQLはバッチINSERT
-                    $builder->setValues($value);
+                    $builder->setValues($this->dataMigrationService->fillNotNullDefaults($em, $tableName, $value));
 
                     if (($i % $batchSize) === 0) {
                         try {
