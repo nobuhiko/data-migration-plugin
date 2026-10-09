@@ -15,6 +15,27 @@ use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 class DataMigrationService
 {
+    public const MODE_OVERWRITE = 'overwrite';
+    public const MODE_INSERT_MISSING = 'insert_missing';
+    public const MODE_SKIP = 'skip';
+
+    /**
+     * 4.x からの移行で、既定では移行しないテーブル (画面・テンプレート・CSV 定義など 4.4 の初期データを使う).
+     * dtb_member / mtb_authority は別途 upsert するためここには含めない.
+     */
+    public const SYSTEM_TABLES = [
+        'dtb_page',
+        'dtb_page_layout',
+        'dtb_layout',
+        'dtb_block',
+        'dtb_block_position',
+        'dtb_template',
+        'dtb_csv',
+        'dtb_mail_template',
+        'dtb_authority_role',
+        'dtb_plugin',
+    ];
+
     private string $migrationVersion = '2';
 
     /**
@@ -117,12 +138,12 @@ class DataMigrationService
             }
         }
 
-        // 4.0/4.1系の場合
+        // 4.x系 (4.0〜4.3) の場合
         if (file_exists($csvDir . 'dtb_order_item.csv')) {
-            $this->migrationVersion = '4.0/4.1';
+            $this->migrationVersion = '4.x';
         }
 
-        if ($this->migrationVersion != "4.0/4.1") {
+        if ($this->migrationVersion != "4.x") {
             // 3系の場合
             if (file_exists($csvDir . 'dtb_product.csv')) {
                 $this->migrationVersion = '3';
@@ -408,6 +429,29 @@ class DataMigrationService
             $this->deleteWithChildren($em, trim((string) $child, '"'), $protected, $done);
         }
         $em->executeStatement('DELETE FROM ' . $em->quoteIdentifier($table));
+    }
+
+    /**
+     * 4.x からの移行でテーブルごとの扱いを決める.
+     *
+     * - すべて移行する指定なら上書き
+     * - mtb_* (マスタ) は 4.4 の初期値を優先し、旧環境で追加された行だけ補う (販売種別など FK で参照される行のため)
+     * - 画面・テンプレート・CSV 定義などのシステムテーブルは移行しない
+     * - それ以外 (会員・商品・受注・設定など) は上書き
+     */
+    public function getTableMigrationMode(string $tableName, bool $migrateAll): string
+    {
+        if ($migrateAll) {
+            return self::MODE_OVERWRITE;
+        }
+        if (str_starts_with($tableName, 'mtb_')) {
+            return self::MODE_INSERT_MISSING;
+        }
+        if (in_array($tableName, self::SYSTEM_TABLES, true)) {
+            return self::MODE_SKIP;
+        }
+
+        return self::MODE_OVERWRITE;
     }
 
     public function checkUploadSize()

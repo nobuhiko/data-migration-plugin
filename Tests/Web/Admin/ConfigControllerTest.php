@@ -29,6 +29,7 @@ final class ConfigControllerTest extends AbstractAdminWebTestCase
         yield ['3_0_18', 1, 2, 4, 0];
         yield ['4_0_6', 1, 12, 20, 0];
         yield ['4_1_2', 1, 12, 20, 0];
+        yield ['4_3_1', 2, 4, 3, 0];
         yield ['member_test', 0, 0, 0, 2];
     }
 
@@ -103,6 +104,49 @@ final class ConfigControllerTest extends AbstractAdminWebTestCase
             }
             throw $e;
         }
+    }
+
+    /**
+     * 4.3 → 4.4: 画面・テンプレートは 4.4 の初期データを残し、4.4 で追加された列はデフォルト値になることをテスト
+     */
+    public function test4系からの移行で画面とデフォルト値が4_4側に保たれる(): void
+    {
+        $container = self::getContainer();
+        $project_dir = $container->getParameter('kernel.project_dir');
+        $conn = $this->entityManager->getConnection();
+
+        $pagesBefore = (int) $conn->fetchOne('SELECT count(*) FROM dtb_page');
+        $blocksBefore = (int) $conn->fetchOne('SELECT count(*) FROM dtb_block');
+        $saleTypesBefore = (int) $conn->fetchOne('SELECT count(*) FROM mtb_sale_type');
+
+        $file = $project_dir . '/app/Plugin/DataMigration44/Tests/Fixtures/4_3_1.tar.gz';
+        $testFile = $project_dir . '/app/Plugin/DataMigration44/Tests/Fixtures/test.tar.gz';
+        (new Filesystem())->copy($file, $testFile);
+        $upload = new UploadedFile($testFile, 'test.tar.gz', 'application/x-tar', null, true);
+
+        $this->client->request(
+            'POST',
+            $this->generateUrl('data_migration44_admin_config'),
+            ['config' => [Constant::TOKEN_NAME => 'dummy', 'import_file' => $upload, 'auth_magic' => 'dummy']],
+            ['config' => ['import_file' => $upload]]
+        );
+
+        // 業務データは移行される
+        $this->assertSame(2, (int) $conn->fetchOne('SELECT count(*) FROM dtb_customer'));
+        $this->assertSame(4, (int) $conn->fetchOne('SELECT count(*) FROM dtb_product'));
+        // 画面・ブロックは 4.4 の初期データのまま
+        $this->assertSame($pagesBefore, (int) $conn->fetchOne('SELECT count(*) FROM dtb_page'));
+        $this->assertSame($blocksBefore, (int) $conn->fetchOne('SELECT count(*) FROM dtb_block'));
+        // マスタは 4.4 側の行が残る (4.3 に無い行が消えない)
+        $this->assertGreaterThanOrEqual($saleTypesBefore, (int) $conn->fetchOne('SELECT count(*) FROM mtb_sale_type'));
+        // 4.4 で追加された NOT NULL 列は 0 ではなく DB のデフォルト値になる
+        $this->assertTrue((bool) $conn->fetchOne('SELECT order_pdf_visible_shop_name FROM dtb_base_info WHERE id = 1'));
+        $this->assertSame(4, (int) $conn->fetchOne('SELECT count(*) FROM dtb_product WHERE refund_allowed = true'));
+        // in_stock は在庫から再計算される (在庫無制限の規格は true)
+        $this->assertSame(
+            (int) $conn->fetchOne('SELECT count(*) FROM dtb_product_class WHERE stock_unlimited = true'),
+            (int) $conn->fetchOne('SELECT count(*) FROM dtb_product_class WHERE stock_unlimited = true AND in_stock = true')
+        );
     }
 
     /**

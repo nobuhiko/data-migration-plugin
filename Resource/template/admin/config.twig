@@ -111,6 +111,19 @@ file that was distributed with this source code.
                                     {{ form_errors(form.customer_order_only ) }}
                                 </div>
                             </div>
+                            <div class="row">
+                                <div class="col-2"><span>オプション</span></div>
+                                <div class="col">
+                                    <div class="form-check">
+                                        <input type="checkbox" id="{{ form.migrate_all_tables.vars.id }}" name="{{ form.migrate_all_tables.vars.full_name }}" class="form-check-input" value="1" />
+                                        <label class="form-check-label" for="{{ form.migrate_all_tables.vars.id }}">{{ form.migrate_all_tables.vars.label }}</label>
+                                        <i data-tooltip="true"
+                                           data-placement="top"
+                                           data-original-title="このオプションを利用するには、一度全データが移行されている必要があります。新サイトの構築期間中に、旧サイトで発生した会員や受注データを取り込みたい場合に使用してください" class="fa fa-question-circle fa-lg ml-1"></i>
+                                    </div>
+                                    {{ form_errors(form.migrate_all_tables ) }}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

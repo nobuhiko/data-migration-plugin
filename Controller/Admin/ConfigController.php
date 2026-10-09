@@ -108,7 +108,7 @@ class ConfigController extends AbstractController
                 $this->fix24baseinfo($csvDir);
             }
 
-            if ($this->dataMigrationService->isVersion('4.0/4.1')) {
+            if ($this->dataMigrationService->isVersion('4.x')) {
                 // 権限/メンバーを先に処理（外部キー制約のため）
                 $this->upsertAuthorityAndMember($em, $csvDir);
                 $this->collectMissingCreatorIds($csvDir, [
@@ -129,7 +129,11 @@ class ConfigController extends AbstractController
                     if (is_file($csvDir . $file) && pathinfo($file, PATHINFO_EXTENSION) === 'csv') {
                         // dtb_member, dtb_plugin はスキップ（別途処理済み or 処理不要）
                         if ($file !== 'dtb_member.csv' && $file !== 'dtb_plugin.csv') {
-                            $this->fix4x($em, $csvDir, $file);
+                            $mode = $this->dataMigrationService->getTableMigrationMode(
+                                str_replace('.csv', '', $file),
+                                (bool) $form['migrate_all_tables']->getData()
+                            );
+                            $this->fix4x($em, $csvDir, $file, $mode);
                         }
                     }
                 }
@@ -212,7 +216,7 @@ class ConfigController extends AbstractController
         // 会員
         $this->saveToC($em, $csvDir, 'dtb_customer');
 
-        if ($this->dataMigrationService->isVersion('4.0/4.1')) {
+        if ($this->dataMigrationService->isVersion('4.x')) {
             $this->saveToC($em, $csvDir, 'dtb_customer_address');
             $this->saveToO($em, $csvDir, 'dtb_delivery_time');
         } else if ($this->dataMigrationService->isVersion('3')) {
@@ -226,7 +230,7 @@ class ConfigController extends AbstractController
         $this->saveToO($em, $csvDir, 'dtb_order');
         $this->saveToO($em, $csvDir, 'dtb_shipping');
         $this->saveToO($em, $csvDir, 'dtb_mail_history', 'dtb_mail_history');
-        if ($this->dataMigrationService->isVersion('4.0/4.1')) {
+        if ($this->dataMigrationService->isVersion('4.x')) {
             $this->saveToO($em, $csvDir, 'dtb_order_item');
         } else {
             $this->saveToO($em, $csvDir, 'dtb_order_detail', 'dtb_order_item', true);
@@ -272,13 +276,13 @@ class ConfigController extends AbstractController
             $this->saveToC($em, $csvDir, 'mtb_job', null, true);
             $this->saveToC($em, $csvDir, 'mtb_sex', null, true);
 
-            if ($this->dataMigrationService->isVersion('4.0/4.1')) {
+            if ($this->dataMigrationService->isVersion('4.x')) {
                 $this->saveToC($em, $csvDir, 'mtb_customer_order_status', null, true);
                 $this->saveToC($em, $csvDir, 'mtb_customer_status', null, true);
             }
 
             $this->saveToC($em, $csvDir, 'dtb_customer');
-            if ($this->dataMigrationService->isVersion('4.0/4.1')) {
+            if ($this->dataMigrationService->isVersion('4.x')) {
                 $this->saveToC($em, $csvDir, 'dtb_customer_address');
             } else if ($this->dataMigrationService->isVersion('3')) {
                 // fixme 余計なデータが移行される
@@ -335,7 +339,7 @@ class ConfigController extends AbstractController
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
 
                 foreach ($listTableColumns as $column) {
-                    if ($this->dataMigrationService->isVersion('4.0/4.1') == true) {
+                    if ($this->dataMigrationService->isVersion('4.x') == true) {
                         if ($column == 'sort_no') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 0;
                         } elseif ($column == 'creator_id') {
@@ -460,7 +464,7 @@ class ConfigController extends AbstractController
 
     private function saveProduct($em, $csvDir)
     {
-        if ($this->dataMigrationService->isVersion('4.0/4.1')) {
+        if ($this->dataMigrationService->isVersion('4.x')) {
             $product_db_name = 'dtb_product';
         } else if ($this->dataMigrationService->isVersion('3')) {
             $product_db_name = 'dtb_product';
@@ -676,7 +680,7 @@ class ConfigController extends AbstractController
 
                 // Schemaにあわせた配列を作成する
                 foreach ($listTableColumns as $column) {
-                    if ($this->dataMigrationService->isVersion('4.0/4.1') == true) {
+                    if ($this->dataMigrationService->isVersion('4.x') == true) {
                         if ($column == 'class_category_id1') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : null;
                         } elseif ($column == 'class_category_id2') {
@@ -838,7 +842,7 @@ class ConfigController extends AbstractController
                 // 別テーブルからのデータなど
                 switch ($tableName) {
                     case 'dtb_product_class':
-                        if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
+                        if ($this->dataMigrationService->isVersion('4.x') == false) {
                             $value['delivery_duration_id'] = !empty($this->delivery_id[$value['product_id']]) ? $this->delivery_id[$value['product_id']] : null;
 
                             // 244用
@@ -860,7 +864,7 @@ class ConfigController extends AbstractController
                         break;
                     case 'dtb_customer_favorite_product':
 
-                        if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
+                        if ($this->dataMigrationService->isVersion('4.x') == false) {
                             // 3系には del_flg がある
                             if (isset($data['del_flg']) && $data['del_flg'] == 1) {
                                 unset($value);
@@ -1527,7 +1531,7 @@ class ConfigController extends AbstractController
             $this->saveToO($em, $csvDir, 'dtb_tax_rule', null, true); // 税率0にしている場合がある
 
             // todo ダウンロード販売の処理
-            if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
+            if ($this->dataMigrationService->isVersion('4.x') == false) {
                 $this->saveToO($em, $csvDir, 'dtb_order_detail', 'dtb_order_item', true);
             } else {
                 // v4
@@ -1540,7 +1544,7 @@ class ConfigController extends AbstractController
                 $this->saveOrderItem($em);
             }
 
-            if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
+            if ($this->dataMigrationService->isVersion('4.x') == false) {
                 // 支払いは基本移行しない
                 $em->executeStatement('DELETE FROM dtb_payment_option');
             }
@@ -1638,7 +1642,7 @@ class ConfigController extends AbstractController
 
                 // Schemaにあわせた配列を作成する
                 foreach ($listTableColumns as $column) {
-                    if ($this->dataMigrationService->isVersion('4.0/4.1') == true) {
+                    if ($this->dataMigrationService->isVersion('4.x') == true) {
                         if ($column == 'use_point') {
                             $value[$column] = !empty($data[$column]) ? $data[$column] : 0;
                         } elseif ($column == 'creator_id') {
@@ -1811,7 +1815,7 @@ class ConfigController extends AbstractController
                 // 別テーブルからのデータなど
                 switch ($tableName) {
                     case 'dtb_order':
-                        if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
+                        if ($this->dataMigrationService->isVersion('4.x') == false) {
                             // 配送ID
                             if (isset($data['deliv_id'])) {
                                 $this->delivery_id[$data['id']] = $data['deliv_id'];
@@ -1893,7 +1897,7 @@ class ConfigController extends AbstractController
                         break;
 
                     case 'dtb_tax_rule':
-                        if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
+                        if ($this->dataMigrationService->isVersion('4.x') == false) {
                             $value['id'] = $data['tax_rule_id'];
                             $value['apply_date'] = self::convertTz($data['apply_date']);
                             $value['rounding_type_id'] = $data['calc_rule'];
@@ -1940,7 +1944,7 @@ class ConfigController extends AbstractController
                         break;
 
                     case 'dtb_order_item':
-                        if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
+                        if ($this->dataMigrationService->isVersion('4.x') == false) {
                             if (isset($data['order_detail_id'])) {
                                 $value['id'] = $data['order_detail_id'];
                             } else {
@@ -1997,7 +2001,7 @@ class ConfigController extends AbstractController
                         break;
 
                     case 'dtb_mail_history':
-                        if ($this->dataMigrationService->isVersion('4.0/4.1') == false) {
+                        if ($this->dataMigrationService->isVersion('4.x') == false) {
                             $value['id'] = $data['send_id'];
                             $value['order_id'] = $data['order_id'];
                             $value['send_date'] = self::convertTz($data['send_date']);
@@ -2210,8 +2214,11 @@ class ConfigController extends AbstractController
         return array_values($this->tax_rule)[0];
     }
 
-    private function fix4x($em, $tmpDir, $csvName)
+    private function fix4x($em, $tmpDir, $csvName, string $mode = DataMigrationService::MODE_OVERWRITE)
     {
+        if ($mode === DataMigrationService::MODE_SKIP) {
+            return;
+        }
         // csvNameからテーブル名を取得
 
         if (filesize($tmpDir . $csvName) == 0) {
@@ -2233,9 +2240,20 @@ class ConfigController extends AbstractController
         $platform = $this->dataMigrationService->begin($em);
 
         // PostgreSQLではUPSERTを使うため、resetTableは不要
-        // MySQLは従来通りresetTable()を使用
-        if ($platform !== 'postgresql') {
+        // MySQLは従来通りresetTable()を使用 (不足行のみ追加するモードでは既存行を残す)
+        if ($platform !== 'postgresql' && $mode === DataMigrationService::MODE_OVERWRITE) {
             $this->dataMigrationService->resetTable($em, $tableName);
+        }
+
+        // 不足行のみ追加するモード: 既存の id を持つ行はスキップする (4.4 の初期データを優先)
+        $existingIds = null;
+        if ($mode === DataMigrationService::MODE_INSERT_MISSING) {
+            if (!in_array('id', $listTableColumns, true)) {
+                $em->commit();
+
+                return;
+            }
+            $existingIds = array_fill_keys($em->fetchFirstColumn('SELECT id FROM ' . $em->quoteIdentifier($tableName)), true);
         }
 
         // PostgreSQLの場合、UPSERT用のプライマリキーを取得
@@ -2264,6 +2282,9 @@ class ConfigController extends AbstractController
 
                 // 1行目をkeyとした配列を作る
                 $data = $this->dataMigrationService->convertNULL(array_combine($key, $row));
+                if ($existingIds !== null && isset($data['id']) && isset($existingIds[$data['id']])) {
+                    continue;
+                }
                 // Schemaにあわせた配列を作成する
                 $value = [];
                 foreach ($columns as $column) {
@@ -2297,7 +2318,12 @@ class ConfigController extends AbstractController
                         $search = ['dtb_', 'mtb_', '_'];
                         $value[$columnName] = str_replace($search, '', $tableName);
                     } elseif ($column->getNotNull()) {
-                        $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : 0;
+                        if (isset($data[$columnName]) && $data[$columnName] !== '') {
+                            $value[$columnName] = $data[$columnName];
+                        } else {
+                            // バックアップに無い列 (4.4 で追加された列など) は DB のデフォルト値を使う (null は fillNotNullDefaults が埋める)
+                            $value[$columnName] = $column->getDefault() !== null ? null : 0;
+                        }
                     } else {
                         $value[$columnName] = isset($data[$columnName]) && $data[$columnName] !== '' ? $data[$columnName] : null;
                     }

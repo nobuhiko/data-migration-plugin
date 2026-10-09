@@ -33,6 +33,9 @@ class ConfigType extends AbstractType
             ])->add('customer_order_only', CheckboxType::class, [
                 'label' => '会員と受注データのみ移行する(一度データ移行を実施している必要があります)',
                 'required' => false,
+            ])->add('migrate_all_tables', CheckboxType::class, [
+                'label' => '画面・テンプレート・CSV設定・マスタデータも含めてすべてのテーブルを移行する(4.x からの移行のみ。通常は会員・商品・受注などの業務データだけを移行し、画面やマスタは 4.4 の初期値を使います)',
+                'required' => false,
             ])
             ->add('auth_magic', TextType::class, [
                 'label' => 'AUTH_MAGIC',
